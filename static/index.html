@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FluidSender</title>
+<script>
+  // The color theme (View → Theme), set before the first paint: the one chosen last (theme.js saves it), else Medium
+  (() => {
+    let t = 'medium';
+    try { const v = JSON.parse(localStorage.getItem('theme')); if (['dark', 'medium', 'light'].includes(v)) t = v; } catch { /* no storage */ }
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2322252a'/%3E%3Cpath d='M3.5 3h9L8 14z' fill='%23e8a33d'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="vendor/codemirror/lib/codemirror.css">
+<link rel="stylesheet" href="vendor/codemirror/addon/dialog/dialog.css">
+<link rel="stylesheet" href="style.css">
+<script src="vendor/codemirror/lib/codemirror.js"></script>
+<script src="vendor/codemirror/addon/mode/simple.js"></script>
+<script src="vendor/codemirror/addon/dialog/dialog.js"></script>
+<script src="vendor/codemirror/addon/search/searchcursor.js"></script>
+<script src="vendor/codemirror/addon/search/search.js"></script>
+<script src="vendor/codemirror/addon/search/jump-to-line.js"></script>
+<script src="vendor/codemirror/addon/selection/active-line.js"></script>
+<script src="vendor/dockview/dockview-core.min.js"></script>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<div id="menubar"></div>
+<div id="dock"></div>
+<div id="status">
+  <span id="smsg"></span>
+  <span id="spos"></span>
+  <span id="sfile">No file</span>
+  <span id="spend" class="off" role="button" tabindex="0">Pendant: off</span>
+  <span id="sconn">Not connected</span>
+</div>
+
+<dialog id="openDlg" class="dlg">
+  <div class="dhead">Open G-code or scan</div>
+  <div class="dbody"></div>
+  <div class="dfoot">
+    <span class="grow">Double-click a file, or select it and press Open.</span>
+    <button data-act="cancel">Cancel</button>
+    <button data-act="ok" class="primary">Open</button>
+  </div>
+</dialog>
+
+<dialog id="saveDlg" class="dlg">
+  <div class="dhead">Save G-code as</div>
+  <div class="dbody"></div>
+  <div class="dfoot">
+    <label class="grow">File name <input type="text" spellcheck="false"></label>
+    <button data-act="cancel">Cancel</button>
+    <button data-act="ok" class="primary">Save</button>
+  </div>
+</dialog>
+
+<dialog id="xyzDlg" class="dlg">
+  <div class="dhead">Level the G-code with a scan file (.xyz)</div>
+  <div class="dbody"></div>
+  <div class="dfoot">
+    <span class="grow">A scan saved by FluidSender (Save Scan…) or by UGS. Double-click it, or select it and press Choose.</span>
+    <button data-act="cancel">Cancel</button>
+    <button data-act="ok" class="primary">Choose</button>
+  </div>
+</dialog>
+
+<dialog id="scanSaveDlg" class="dlg">
+  <div class="dhead">Save scan as</div>
+  <div class="dbody"></div>
+  <div class="dfoot">
+    <label class="grow">File name <input type="text" spellcheck="false"></label>
+    <button data-act="cancel">Cancel</button>
+    <button data-act="ok" class="primary">Save</button>
+  </div>
+</dialog>
+
+<dialog id="connDlg" class="dlg small">
+  <div class="dhead">Connect to FluidNC</div>
+  <div class="dbody pad">
+    <div class="cform">
+      <label for="connPort">Port</label>
+      <select id="connPort" data-f="port"></select>
+      <button data-act="refresh" title="Look for serial ports again">⟳ Refresh</button>
+      <label for="connBaud">Baud</label>
+      <select id="connBaud" data-f="baud">
+        <option>9600</option><option>19200</option><option>38400</option><option>57600</option>
+        <option selected>115200</option><option>230400</option><option>460800</option><option>921600</option>
+      </select>
+      <span></span>
+    </div>
+    <p class="cwarn" hidden></p>
+    <p class="cmsg" hidden></p>
+    <p class="dim">Nothing is sent until you press Connect. Then FluidSender asks FluidNC for its status,
+    version ($I) and modes ($G), reads the axes' max speeds and accelerations and the coolant outputs' pins
+    ($/axes/…, $/coolant/…; it never changes them) and the spindle type ($SS), and switches to inches (G20)
+    once the machine is Idle; G-code you send before that waits for it.
+    It never homes, unlocks, resets or moves by itself. A port another program holds (like UGS) can't be
+    chosen.</p>
+  </div>
+  <div class="dfoot">
+    <span class="grow"></span>
+    <button data-act="cancel">Cancel</button>
+    <button data-act="ok" class="primary">Connect</button>
+  </div>
+</dialog>
+
+<dialog id="pendDlg" class="dlg small">
+  <div class="dhead">Bluetooth jog pendant</div>
+  <div class="dbody pad">
+    <div class="cform">
+      <label for="pendPort">Port</label>
+      <select id="pendPort" data-f="port"></select>
+      <button data-act="refresh" title="Look for serial ports again (opens none)">⟳ Refresh</button>
+    </div>
+    <p class="pstate dim"></p>
+    <p class="cwarn" hidden></p>
+    <p class="cmsg" hidden></p>
+    <p class="dim">The pendant talks over Bluetooth: Blueman makes its link <b>/dev/rfcomm1</b> (in Blueman: the pendant →
+    Serial Port). Nothing is opened until you press Connect. Then FluidSender answers the pendant and sends it the
+    position, the state and the job's progress a few times a second. Its keys jog with the Jog panel's step and speed
+    (its step keys change them there too), zero X / Y / Z, go to zero, home, run, pause / resume and stop, like the
+    buttons here; the Console shows each key. If the pendant stops answering for a while it shows “waiting”, and goes
+    on by itself when it answers again. Switching the pendant off drops Blueman's Bluetooth link: it then shows “off”,
+    and you connect it here again once it is on (FluidSender never connects by itself).</p>
+  </div>
+  <div class="dfoot">
+    <span class="grow"></span>
+    <button data-act="disc" hidden>Disconnect</button>
+    <button data-act="cancel">Close</button>
+    <button data-act="ok" class="primary">Connect</button>
+  </div>
+</dialog>
+
+<dialog id="helpDlg" class="dlg small">
+  <div class="dhead">Keyboard shortcuts and buttons</div>
+  <div class="dbody pad">
+    <table class="keys">
+      <tr><td>Ctrl+O</td><td>Open a G-code or scan file</td></tr>
+      <tr><td>Ctrl+S / Ctrl+Shift+S</td><td>Save / Save as</td></tr>
+      <tr><td>Ctrl+Z / Ctrl+Y</td><td>Undo / Redo in the editor</td></tr>
+      <tr><td>Ctrl+F, Ctrl+G</td><td>Find, find next</td></tr>
+      <tr><td>Shift+Ctrl+F</td><td>Replace</td></tr>
+      <tr><td>Alt+G</td><td>Go to line</td></tr>
+      <tr><td>F11</td><td>Maximize / restore the active panel</td></tr>
+      <tr><td>Console</td><td>Enter sends the line to FluidNC · Up / Down: earlier lines · ? ! ~ on their own
+        go at once (status, feed hold, resume)</td></tr>
+      <tr><td>Jog buttons</td><td>Click: one step of the chosen distance (10 … 0.001 in) · Hold: moves until you let
+        go · Stop: stops at once</td></tr>
+      <tr><td>Jog keys</td><td>While the Jog panel has focus (click it; it shows “keys on”): ←&nbsp;→&nbsp;X ·
+        ↑&nbsp;↓&nbsp;Y · PageUp&nbsp;/&nbsp;PageDown&nbsp;Z · a tap is one step, holding moves until you let go · Esc stops</td></tr>
+      <tr><td>Two clicks</td><td>Zero (X, Y, Z), Zero All, Undo Zero, Go to XY 0 and Go to Z 0 ask first: the first
+        click turns the button amber (“Zero X? click again”; Go to says how far and which way it moves, and if Z goes
+        up first), a second click 0.5 to 3 s later does it. Any key (Esc too), a click anywhere else or waiting 3 s
+        cancels. A double-click never counts: wait half a second before the second click</td></tr>
+      <tr><td>Mouse only</td><td>No key presses the buttons that move the machine, set a zero or switch an output: Run,
+        Resume, Home, Go to, Zero, the jog pad, Start Scan, Home Probe, Vacuum and AUX, the overrides (Tab skips them,
+        and clicking them leaves the keys with the Jog panel). Hold, Soft Reset and Stop work from the keyboard too</td></tr>
+      <tr><td>Position</td><td>Click a work position to type a new one (Enter sets it; Enter on the value as it was
+        sends nothing; Esc or clicking elsewhere cancels) · Undo Zero puts the last zero back, and again for the one
+        before: the last 5 zeros (from the page or the pendant) are kept, also through a reset, a reconnect or a restart</td></tr>
+      <tr><td>Go to XY 0 / Z 0</td><td>Rapid moves to the work zero. Go to XY 0 first lifts Z to 0.2 in if it is lower</td></tr>
+      <tr><td>Vacuum / AUX</td><td>Toggle the vacuum (M8) and the AUX relay (M7), at once, also during a job. They follow
+        FluidNC's own M7 / M8 / M9 state (what $G says), so a program's M8 / M7 / M9 shows too, once FluidNC has run it.
+        A toggle is refused, with the reason on the button, while the program's own M8 / M7 / M9 still waits for the
+        moves before it (a click then would cancel it), while jogging, and when FluidNC has no pin for that output
+        (“no pin”). With a coolant delay set in FluidNC, switching on during a job holds up its planning that long
+        (the button's tooltip says it). Not connected, they show the last state seen with a ?: “on?” in amber may
+        still be on, since disconnecting switches nothing off (Disconnect asks first when one is on)</td></tr>
+      <tr><td>▶ Run · ⏸ Hold · Resume</td><td>Buttons whose labels never change (their tooltips say what each does now,
+        or why not). ▶ Run (green when it can run) starts the loaded G-code from the top: it asks first, and says the
+        units and modes it runs in (FluidSender sends G20 G90 first, so a program without units runs in inches) and
+        whether it is LEVELED (or NOT leveled, when a scan exists); the editor is read-only while it runs and follows
+        the line being run · ⏸ Hold (feed hold) slows down to a stop · Resume continues after a Hold, an M0 pause or
+        an error pause (a job goes on with the next line). Hold and Resume are off in an ALARM. M1 does nothing in
+        FluidNC (3.9.4 and 4.1.1). Lines FluidNC runs otherwise than they read are shown as warnings when the file is
+        loaded (they still run): an M7 or M8 whose line ends in a number like F100.1 turns AUX or the vacuum OFF, so
+        put M7 / M8 on a line of its own. FluidNC 4.1.1 refuses G-code lines over 127 characters (FluidSender says
+        which line when the file is loaded)</td></tr>
+      <tr><td>Overrides</td><td>Machine panel, under the job: Feed, Spindle (S) and Rapid, at once, also during a job or
+        a hold (FluidNC's realtime overrides; mouse only). Feed: the cutting moves (G1, G2, G3), 10 to 200 % in steps
+        of 1 and 10, or back to 100 %. Spindle: the S the same way; under it the S now (and the programmed S). An
+        on/off spindle only changes the S reported, and below 100 % a small S can switch it off. Rapid (G0): 100, 50
+        or 25 %. A value not at 100 % is amber; the Console says each new value once FluidNC reports it. A reset and
+        M2 / M30 put them back to 100 % (so does Machine → Overrides to 100%)</td></tr>
+      <tr><td>Soft Reset</td><td>No job: Ctrl-X at once. During a job or a scan: stops it safely (Hold first, then the
+        reset once the machine has stopped, so the position is kept). An ALARM leaves the spindle, the vacuum and AUX
+        on: the Machine panel then says so in red, and Soft Reset (red too) turns them off</td></tr>
+      <tr><td>Scan</td><td>The Scan panel sits under the visualizer, left of the Console (View → Scan puts it back there),
+        in columns: Probe | Grid | Scan | Auto-level. Connect the probe, Home Probe, set the area (or Use G-code area),
+        Start Scan. The points show in the visualizer as they come; Save Scan… writes the .xyz file. A Stop, an abort,
+        or a Home that fails (Home Probe, or the scan's retract) leaves the probe not homed, its tip maybe down: the
+        Scan and Jog panels say so (“Probe may be down”) until it is homed again, also once the probe is disconnected
+        or let go of after the window closed (only a restart of FluidSender's server, after an update or a reboot,
+        forgets it). They say so for a probe connected and not homed yet too, and still once the window closed and
+        let go of it. Connect the probe if it is not, and Home Probe before moving X or Y: it is a warning only, X and
+        Y moves are not refused</td></tr>
+      <tr><td>Auto-level</td><td>The Scan panel's last column: Level the G-code with the last scan (or a .xyz file), the
+        Z surface (0: the G-code's Z 0 is the scanned surface) and the arc segment (arcs become straight pieces this
+        long; 0.1 mm). It levels the way UGS does. From then on Run (and the pendant's Run) runs the leveled G-code:
+        the editor shows it read-only under a banner (Show original, Save leveled G-code…, Leveling off), the
+        visualizer draws it with the scan's area dashed and any moves outside it pink (they get the nearest edge's
+        height), and Run asks with “LEVELED with …”. Opening or changing the G-code, a new scan or another FluidNC
+        turns leveling off (the Console says so); it is never done again by itself. Moving the table or the X / Y zero
+        after a scan (Y shifted for the probe, then put back) never blocks Level or Run: they say by how much it moved.
+        Z must be zeroed on the surface at the scan's first point (FluidSender warns when it can tell)</td></tr>
+      <tr><td>Windows</td><td>A window opened (or reloaded) with no G-code shows the program FluidSender has loaded (during
+        a job, the job's), the one the pendant's Run runs. A window whose G-code is not the loaded one (another window
+        opened another file) says so in amber under Run; its Run loads its own G-code first</td></tr>
+      <tr><td>Pendant</td><td>Machine → Connect Pendant… (/dev/rfcomm1). Its keys jog with the Jog panel's step and
+        speed, zero, go to zero, home, run, pause / resume and stop; the status bar shows “Pendant: connected”. A jog
+        key moves 1 in at most (with the 10 in step it moves 1 in), and a held key never gets more than one step ahead
+        of the machine. Its Run resumes a paused job (as Resume does), and starts the loaded program when FluidNC is
+        Idle; neither Run nor Pause resumes a job an error paused (that is told and resumed here). The pendant's own
+        firmware decides when Run, Pause and Stop are sent. With the fixed firmware (NANO_jogbox.ino of 2026-10) they
+        follow the machine as its screen shows it (ALARM, STOPPING, ERROR … too): Stop always, Pause unless IDLE, Run
+        in IDLE with a program loaded or to resume a pause, and a double tap counts within 1 s. With the original
+        firmware, Pause and Stop send nothing unless Run was pressed on the pendant (so for a job or a scan started
+        here the status bar says “Pendant Stop/Pause inactive”: use Hold or Soft Reset), after a Run it sends Run again
+        only after its Stop key (a refused Run says so in the Console), and the double-tap keys (zero, go to zero,
+        home) have no time limit, so a single tap stays armed until the next tap of that key.
+        Switching the pendant off drops its Bluetooth link: the status bar then shows “Pendant: off”; connect it again
+        from the Machine menu. Closing FluidSender's window lets go of the machine, the pendant and the probe about
+        10 s later, once FluidNC is at rest and answering (Idle, or an ALARM with the spindle and vacuum/AUX off).
+        Never during a job or a scan: then the pendant stays, for its Stop and Pause. A Hold, an open door, an ALARM
+        that may have left the spindle or vacuum/AUX on (until a Soft Reset turns them off: after a hard or soft limit
+        the pendant's Stop is that reset) or another FluidSender window still open keeps all three. The next window
+        connects none of them by itself: connect FluidNC, the pendant and the probe again.
+        The pendant's Home all ($H) works only in ALARM (to home otherwise, use Home here), and Machine X0 / Y0 (G53) are
+        refused while Z is under 0.2 in above the work zero: lift Z first (Machine Z0)</td></tr>
+      <tr><td>Visualizer</td><td>Drag: rotate · Right-drag: pan · Wheel: zoom</td></tr>
+      <tr><td>Panels</td><td>Drag a tab to move or dock it anywhere; drag the edges between panels to resize</td></tr>
+    </table>
+  </div>
+  <div class="dfoot"><span class="grow"></span><button data-act="cancel" class="primary">Close</button></div>
+</dialog>
+
+<dialog id="aboutDlg" class="dlg small">
+  <div class="dhead">About FluidSender</div>
+  <div class="dbody pad">
+    <p><b>FluidSender</b>: a lean G-code sender for FluidNC, built for this machine.</p>
+    <p>Dockable panels, G-code editor, 3D toolpath and scan view, the FluidNC connection over USB with live
+    position, state and console (stage 1); jog, home, unlock and zero (stage 2); running jobs with Run, Hold, Resume
+    and a safe Soft Reset, the vacuum (M8) and AUX (M7) toggles, Go to XY 0 / Z 0 and two-click zeroing (stage 3);
+    the Bluetooth jog pendant, the Leonardo Z probe and the surface scan (stage 4); FluidNC 4.1.1 (3.9.4 still
+    works), the feed / spindle (S) / rapid overrides, auto-leveling the G-code with the scan as UGS does it, the Scan
+    panel beside the Console, ▶ Run · ⏸ Hold · Resume · Soft Reset with labels that never change, the vacuum and AUX
+    following FluidNC's M7 / M8 state, and the pendant's Run, Pause and Stop following the machine with its fixed
+    firmware (stage 5).<br>
+    Next: the probe accuracy test and checking a leveled file.</p>
+    <p class="dim">Uses three.js, CodeMirror 5 and dockview (MIT licenses).</p>
+  </div>
+  <div class="dfoot"><span class="grow"></span><button data-act="cancel" class="primary">Close</button></div>
+</dialog>
+</body>
+</html>
