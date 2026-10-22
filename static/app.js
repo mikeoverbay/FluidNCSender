@@ -1068,6 +1068,7 @@ const REALTIME = {
 };
 
 async function realtime(cmd) {
+  if (cmd === 'reset') { machinePanel.noteReset(); machineChanged(); }
   if (cmd !== 'status') konsole.write(REALTIME[cmd], 'info');     // logged first: its effects arrive before the reply
   await machineCall(REALTIME[cmd], () => machine.realtime(cmd));
 }
@@ -1086,11 +1087,13 @@ function softReset() {
       + 'it has stopped, a Soft Reset (Ctrl-X). The reset drops the lines FluidNC has not run yet and turns the spindle, the vacuum '
       + 'and AUX off. The position is kept.\n\nIf the machine has not stopped within 10 s it resets anyway, and the position may then be lost.')) return;
     konsole.write('Stop the job (Hold, then Soft Reset once stopped)', 'info');
+    machinePanel.noteReset(); machineChanged();
     return machineCall('Stop the job', () => machine.stop());
   }
   if (mach.scan?.running) {
     if (!confirm('Stop the surface scan?\n\nThe probe stops at once, and the machine stops safely: a Hold first, then a Soft Reset once '
       + 'it has stopped (the position is kept). The points measured so far stay.')) return;
+    machinePanel.noteReset(); machineChanged();
     return machineCall('Stop the scan', () => machine.stop());
   }
   if (!confirm('Soft reset FluidNC (Ctrl-X)?\n\nIt stops everything at once and drops the lines waiting to be sent. '

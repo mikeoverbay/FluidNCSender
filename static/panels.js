@@ -101,6 +101,7 @@ const OVR = [
 ];
 const RAPIDS = [25, 50, 100];
 const OV_MIN = 10, OV_MAX = 200;
+const RESET_WAIT_MS = 2000;
 // Spindle types whose speed is only on or off (FluidNC's OnOff and Relay): the override changes only the S reported
 const ON_OFF = /^(on.?off|relay)/i;
 
@@ -175,6 +176,7 @@ export class MachinePanel {
    *  onUndoZero, onHome(axes), onUnlock and onOverride({ which, step } | { which, to }). */
   constructor(actions = {}) {
     this.ov = null;
+    this.resetAt = 0;        // when the page last sent a Soft Reset (or a safe stop): Resume waits for a fresh state
     // The buttons that matter now come first, so they show without scrolling in a short panel:
     // Connect… while not connected, Run / Hold / Resume / Soft Reset and the job while connected, and in
     // Alarm Home / Unlock right under those
@@ -199,7 +201,7 @@ export class MachinePanel {
       </div>
       <!-- the feed, spindle and rapid overrides: realtime, so also during a job, a hold or a jog -->
       <div class="movr" data-when="live" hidden>
-        ${OVR.map(o => `<span class="olab" title="${o.title}">${o.label}</span>`
+        ${OVR.map(o => `<span class="olab" data-ovl="${o.which}" title="${o.title}">${o.label}</span>`
           + (o.which === 'rapid' ? `<span class="orap">${RAPIDS.map(v => `<button data-ov="rapid" data-to="${v}">${v}%</button>`).join('')}</span>`
             : `${[-10, -1].map(s => `<button data-ov="${o.which}" data-step="${s}">−${-s}</button>`).join('')}`
               + `<b class="oval" data-ovv="${o.which}">—</b>`
@@ -222,20 +224,21 @@ export class MachinePanel {
       <!-- under the position, not above it: appearing there moves no Zero button under the pointer -->
       <div class="zundo" hidden><span></span><button data-act="undo" class="zsmall"></button></div>
       <div class="abc"></div>
-      <div class="row"><span>Feed</span><b data-f="feed">—</b></div>
-      <div class="row"><span>Spindle</span><b data-f="spindle">—</b></div>
-      <div class="row"><span>Modes</span><b data-f="modal">—</b></div>
-      <div class="row" hidden><span>Pins</span><b data-f="pins"></b></div>
-      <div class="row"><span>Firmware</span><b data-f="fw">—</b></div>
-      <div class="row"><span>Port</span><b data-f="port">—</b></div>
-      <div class="mbtns" data-when="live" hidden><button data-act="disc" title="Close the serial port">Disconnect</button></div>
+      <!-- right under the position: at 1280x763 Home / Unlock show without scrolling (the read-outs come after) -->
       <div data-slot="normal">
         <div class="mbtns hbtns">
           <button data-act="home">Home ($H)</button>
           <button data-act="homez">Home Z ($HZ)</button>
           <button data-act="unlock">Unlock ($X)</button>
         </div>
-      </div>`);
+      </div>
+      <div class="row"><span>Feed</span><b data-f="feed">—</b></div>
+      <div class="row"><span>Spindle</span><b data-f="spindle">—</b></div>
+      <div class="row"><span>Modes</span><b data-f="modal">—</b></div>
+      <div class="row" hidden><span>Pins</span><b data-f="pins"></b></div>
+      <div class="row"><span>Firmware</span><b data-f="fw">—</b></div>
+      <div class="row"><span>Port</span><b data-f="port">—</b></div>
+      <div class="mbtns" data-when="live" hidden><button data-act="disc" title="Close the serial port">Disconnect</button></div>`);
     const q = s => this.root.querySelector(s);
     this.badge = q('.state');
     this.sub = q('.msub');
@@ -262,6 +265,7 @@ export class MachinePanel {
     this.ovr = {
       box: q('.movr'), note: q('.onote'), btns: [...this.root.querySelectorAll('[data-ov]')],
       val: Object.fromEntries([...this.root.querySelectorAll('[data-ovv]')].map(b => [b.dataset.ovv, b])),
+      lab: Object.fromEntries([...this.root.querySelectorAll('[data-ovl]')].map(b => [b.dataset.ovl, b])),
     };
     for (const b of this.ovr.btns) {
       mouseOnly(b);
@@ -353,6 +357,7 @@ export class MachinePanel {
   /** m: { link, linkMsg, connected, port, firmware, status, modal, jog, zeroUndo, alarm, program, job, scan,
    *  prog }, as the app keeps them. */
   update(m) {
+    this.lastM = m;
     const live = m.link === 'up' && !!m.connected;
     if (live !== this.live) this.root.scrollTop = 0;    // connected or not: show the badge and the buttons that matter now
     this.live = live;
@@ -432,6 +437,9 @@ export class MachinePanel {
 
   /** ▶ Run, ⏸ Hold, Resume, Soft Reset: four buttons whose labels never change (their tooltips say what each
    *  does now, or why not). Run and Soft Reset know about the job (app.js asks before either). */
+  /** The page sent a Soft Reset (or a safe stop): grey Resume until FluidNC's state has caught up. */
+  noteReset() { this.resetAt = Date.now(); }
+
   jobButtons(m, live, state, critical, outputs) {
     const active = jobActive(m.job), scanning = !!m.scan?.running;
     this.runWhy = runWhy(m);
@@ -455,11 +463,18 @@ export class MachinePanel {
       : 'Hold (feed hold, !): slows down to a stop and keeps the position; a job waits there. Resume goes on.';
     b.hold.classList.toggle('warnb', !alarm && (state === 'Run' || state === 'Jog' || m.job?.state === 'running'));
     const held = !alarm && (state === 'Hold' || state === 'Door' || m.job?.state === 'paused');
-    b.resume.disabled = !live || !held;
+    // Right after a Soft Reset the last status report still says Hold for up to ~0.2 s: Resume stays greyed
+    // until FluidNC reports a state other than Hold / Door (2 s at most), and during a job's safe stop
+    let since = Date.now() - this.resetAt;
+    if (since >= 400 && state !== 'Hold' && state !== 'Door') this.resetAt = 0, since = Infinity;   // caught up
+    const resetting = m.job?.state === 'stopping' || (since < RESET_WAIT_MS && (since < 400 || state === 'Hold' || state === 'Door'));
+    if (resetting && since < RESET_WAIT_MS) clearTimeout(this.resetTimer), this.resetTimer = setTimeout(() => this.update(this.lastM), 450);
+    b.resume.disabled = !live || !held || resetting;
     b.resume.title = (alarm ? 'Resume: not in an ALARM. '
+      : resetting ? 'Resume (~): not while the machine is being reset. '
       : live && !held ? 'Resume (~): nothing is paused now. ' : 'Resume (~): ')
       + 'It continues after a Hold, an M0 pause or an error pause (a job goes on with the next line).';
-    b.resume.classList.toggle('primary', live && held);
+    b.resume.classList.toggle('primary', live && held && !resetting);
     b.reset.disabled = !live;
     b.reset.title = active ? 'Soft Reset: stops the job safely (Hold first, then a reset once the machine has stopped). Asks first.'
       : scanning ? 'Soft Reset: stops the surface scan safely (Hold first, then a reset once stopped). Asks first.'
@@ -483,6 +498,7 @@ export class MachinePanel {
       const got = known ? ov[o.i] : null, want = target?.[o.i] ?? null;
       const v = want ?? got;
       values[o.which] = v;
+      O.lab[o.which]?.classList.toggle('amber', v != null && v !== 100);   // (Rapid has no value box: its label shows it)
       const el = O.val[o.which];
       if (!el) continue;
       const pending = want !== null && got !== null && want !== got;
@@ -504,6 +520,7 @@ export class MachinePanel {
       const does = step ? `${o.label} override ${step > 0 ? '+' : '−'}${Math.abs(step)}%` : `${o.label} override ${to}%`;
       b.title = no ? `${does}: ${no}` : `${does} (at once; also during a job)`;
       b.classList.toggle('on', !step && v === to);
+      b.classList.toggle('amber', which === 'rapid' && v === to && to !== 100);
     }
     // Under it: the spindle speed now (FluidNC's FS: the S in force times the override); an on/off spindle
     const notes = [];
