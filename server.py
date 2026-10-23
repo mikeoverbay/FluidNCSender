@@ -66,6 +66,7 @@ import json
 import os
 import select
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -82,7 +83,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
 GCODE_EXT = (".nc", ".gcode", ".ngc", ".tap")
 EXTENSIONS = GCODE_EXT + (".xyz",)
-DEFAULT_DIR = "/run/user/1000/gvfs/smb-share:server=10.0.0.31,share=mikes_creations/!_CarveMaker"
+GVFS = f"/run/user/{os.getuid()}/gvfs/"
+SHARE_URL = "smb://10.0.0.31/mikes_creations"     # MIKESMACHINE's share; gvfs shows it at DEFAULT_DIR's top
+DEFAULT_DIR = GVFS + "smb-share:server=10.0.0.31,share=mikes_creations/!_CarveMaker"
+MOUNT_RETRY = 30        # s between tries to mount the share while it isn't there
 MAX_FILE = 64 * 1024 * 1024
 MAX_BIG_CALL = 2 * MAX_FILE + 64 * 1024     # a 64 MB file as JSON text (its escapes make it longer)
 MAX_CALL = 64 * 1024
@@ -392,7 +396,12 @@ class Handler(SimpleHTTPRequestHandler):
         return False
 
     def list_dir(self, path):
+        asked = path
         path = os.path.abspath(os.path.expanduser(path or self.start_dir))
+        if path.startswith(GVFS) and not os.path.isdir(path):
+            mount_share()       # not mounted yet (the server can start before the desktop mounts it)
+        if not asked and not os.path.isdir(path):
+            path = os.path.expanduser("~")      # the share is out of reach: start at home this time
         try:
             names = sorted(os.listdir(path), key=str.lower)
         except OSError as e:
@@ -450,6 +459,24 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_json({"ok": True, "path": path, "size": os.path.getsize(path)})
 
 
+_mount_lock = threading.Lock()
+_mount_tried = 0.0
+
+
+def mount_share():
+    """Mounts the Windows share with gio (its saved login, never a prompt), at most every MOUNT_RETRY s."""
+    global _mount_tried
+    with _mount_lock:
+        if time.monotonic() - _mount_tried < MOUNT_RETRY:
+            return
+        _mount_tried = time.monotonic()
+        try:
+            subprocess.run(["gio", "mount", SHARE_URL], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
 def main():
     ap = argparse.ArgumentParser(description="FluidSender local server")
     ap.add_argument("--port", type=int, default=8765)
@@ -457,7 +484,7 @@ def main():
     ap.add_argument("--no-browser", action="store_true", help="don't open the browser")
     args = ap.parse_args()
 
-    Handler.start_dir = args.dir if os.path.isdir(args.dir) else os.path.expanduser("~")
+    Handler.start_dir = args.dir        # (checked on each list: the share may be mounted later)
     Handler.allowed_hosts = (f"localhost:{args.port}", f"127.0.0.1:{args.port}")
     Handler.settings = Settings()
     Handler.machine = Machine(
