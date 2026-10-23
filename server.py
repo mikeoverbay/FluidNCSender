@@ -398,7 +398,7 @@ class Handler(SimpleHTTPRequestHandler):
     def list_dir(self, path):
         asked = path
         path = os.path.abspath(os.path.expanduser(path or self.start_dir))
-        if path.startswith(GVFS) and not os.path.isdir(path):
+        if os.path.realpath(path).startswith(GVFS) and not os.path.isdir(path):     # (or a link to the share)
             mount_share()       # not mounted yet (the server can start before the desktop mounts it)
         if not asked and not os.path.isdir(path):
             path = os.path.expanduser("~")      # the share is out of reach: start at home this time
