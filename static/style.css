@@ -129,6 +129,7 @@
   --dv-floating-border: var(--float-border);
 }
 :root[data-theme="light"] .dockview-theme-dark { color-scheme: light; }
+:root .dockview-theme-dark { --dv-tabs-and-actions-container-font-size: 16.25px; }      /* (dockview's own 13px, at the UI's 125%) */
 :root:not([data-theme="dark"]) ::placeholder { color: var(--placeholder); }      /* (Chrome's own gray is too faint) */
 
 * { box-sizing: border-box; }
@@ -136,7 +137,7 @@
 html, body { height: 100%; margin: 0; }
 body {
   display: flex; flex-direction: column; overflow: hidden;
-  background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, 'Segoe UI', sans-serif;
+  background: var(--bg); color: var(--text); font: 16.25px/1.4 system-ui, 'Segoe UI', sans-serif;
 }
 button {
   background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 4px;
@@ -176,14 +177,14 @@ input[type=text]:focus, input[type=number]:focus, select:focus { outline: none; 
 .mitem.off:hover { background: transparent; }
 .mcheck { width: 20px; text-align: center; color: var(--accent); }
 .mlabel { flex: 1; }
-.mkey { color: var(--dim); padding-left: 24px; font-size: 12px; }
+.mkey { color: var(--dim); padding-left: 24px; font-size: 15px; }
 .msep { height: 1px; margin: 4px 0; background: var(--line); }
 
 /* ---------------------------------------------------------------- dock + status */
 #dock { flex: 1; min-height: 0; }
 #status {
   flex: none; display: flex; gap: 16px; height: 22px; align-items: center; padding: 0 10px;
-  background: var(--panel); border-top: 1px solid var(--line); color: var(--dim); font-size: 12px;
+  background: var(--panel); border-top: 1px solid var(--line); color: var(--dim); font-size: 15px;
   white-space: nowrap;
 }
 #smsg { flex: 1; overflow: hidden; text-overflow: ellipsis; }
@@ -219,11 +220,11 @@ input[type=text]:focus, input[type=number]:focus, select:focus { outline: none; 
 .files { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
 .fbar { flex: none; display: flex; gap: 4px; align-items: center; padding: 4px 6px; border-bottom: 1px solid var(--line); }
 .fbar button { padding: 1px 7px; }
-.fdir { flex: 1; color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.fdir { flex: 1; color: var(--dim); font-size: 13.75px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .flist { flex: 1; overflow-y: auto; padding: 2px 4px; }
 .frow { display: flex; gap: 8px; align-items: baseline; padding: 3px 6px; border-radius: 3px; cursor: default; }
 .frow span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.frow small { color: var(--dim); font-size: 11px; white-space: nowrap; }
+.frow small { color: var(--dim); font-size: 13.75px; white-space: nowrap; }
 .frow:hover { background: var(--raised); }
 .frow.dir span { color: var(--accent); }
 .frow.scan span { color: var(--file-scan); }
@@ -235,7 +236,7 @@ input[type=text]:focus, input[type=number]:focus, select:focus { outline: none; 
 .info, .machine { height: 100%; overflow-y: auto; background: var(--bg); }
 .machine { container-type: inline-size; }     /* the DRO digits scale with the panel width (cqw below) */
 .info h3, .machine h3 {
-  font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim);
+  font-size: 13.75px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim);
   margin: 10px 0 4px; font-weight: 600;
 }
 .info h3:first-child { margin-top: 2px; }
@@ -243,7 +244,7 @@ input[type=text]:focus, input[type=number]:focus, select:focus { outline: none; 
 .row b { font-weight: 500; font-variant-numeric: tabular-nums; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .warn { margin-top: 8px; color: var(--accent); }
 .state {
-  font-size: 18px; font-weight: 700; letter-spacing: .08em; text-align: center; padding: 7px 6px;
+  font-size: 22.5px; font-weight: 700; letter-spacing: .08em; text-align: center; padding: 7px 6px;
   border-radius: 4px; margin-bottom: 6px;
 }
 .state.off { background: var(--raised); color: var(--dim); }
@@ -254,16 +255,16 @@ input[type=text]:focus, input[type=number]:focus, select:focus { outline: none; 
 .state.alarm { background: #c23b35; color: #fff; }
 .state.home { background: #2aa0bf; color: #0d1a1f; }
 .state.check { background: #7a52b3; color: #fff; }
-.msub { text-align: center; font-size: 12px; margin: -2px 0 6px; }
+.msub { text-align: center; font-size: 15px; margin: -2px 0 6px; }
 .stall {
   margin-bottom: 8px; padding: 6px 8px; border: 1px solid var(--bad); border-radius: 4px;
-  background: var(--stall-bg); color: var(--stall-text); font-size: 12px;
+  background: var(--stall-bg); color: var(--stall-text); font-size: 15px;
 }
 .stall b { color: var(--stall-strong); }
 /* an ALARM left the spindle or the coolant on: said plainly, with Soft Reset (which turns them off) in red */
 .outwarn {
   margin-bottom: 8px; padding: 7px 8px; border: 2px solid var(--bad); border-radius: 4px;
-  background: var(--outwarn-bg); color: var(--outwarn-text); font-size: 13px; line-height: 1.35;
+  background: var(--outwarn-bg); color: var(--outwarn-text); font-size: 16.25px; line-height: 1.35;
 }
 button.danger { background: #b3322c; border-color: #e0605a; color: #fff; font-weight: 700; }
 button.danger:hover { background: #c83a33; }
@@ -273,7 +274,7 @@ button.danger:hover { background: #c83a33; }
 .mchip.amber { color: var(--accent); }
 .dro { display: grid; gap: 3px; margin-bottom: 6px; }
 .axis { display: flex; align-items: center; gap: 10px; padding: 1px 10px; background: var(--panel); border-radius: 4px; }
-.axis > span { color: var(--accent); font-weight: 700; font-size: 18px; width: 16px; }
+.axis > span { color: var(--accent); font-weight: 700; font-size: 22.5px; width: 16px; }
 .axis div { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-end; }
 /* 26px, smaller in a narrow panel so all four decimals of a value like -123.4567 always fit (next to the Zero button) */
 .axis b { font: 600 clamp(10px, calc(18cqw - 17.5px), 26px)/1.05 ui-monospace, 'DejaVu Sans Mono', monospace; color: var(--text); white-space: nowrap; }
@@ -284,7 +285,7 @@ button.danger:hover { background: #c83a33; }
 .axis > button { flex: none; }
 button.zsmall { padding: 1px 6px; font: 500 11px/1.3 system-ui, 'Segoe UI', sans-serif; letter-spacing: 0; text-transform: none; }
 .drohead > button { align-self: center; }
-.zundo { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: -4px 0 8px; font-size: 11px; color: var(--dim); }
+.zundo { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: -4px 0 8px; font-size: 13.75px; color: var(--dim); }
 .zundo span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .axis small { min-height: 14px; font: 11px/1.25 ui-monospace, 'DejaVu Sans Mono', monospace; color: var(--dim); white-space: nowrap; }
 .axis small i { font-style: normal; }
@@ -306,7 +307,7 @@ button.zsmall { padding: 1px 6px; font: 500 11px/1.3 system-ui, 'Segoe UI', sans
 .mbtns button { padding: 5px 8px; }
 button.warnb { background: var(--warnb-bg); border-color: var(--warnb-line); color: var(--warnb-text); }
 button.warnb:hover { background: var(--warnb-hover); }
-.note { color: var(--dim); font-size: 12px; margin: 0 0 8px; }
+.note { color: var(--dim); font-size: 15px; margin: 0 0 8px; }
 .note.bad { color: var(--bad); }
 .console { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
 .clog {
@@ -320,7 +321,7 @@ button.warnb:hover { background: var(--warnb-hover); }
 .cbar { flex: none; display: flex; gap: 8px; align-items: center; padding: 4px; border-top: 1px solid var(--line); }
 .cbar .cin { flex: 1; min-width: 0; }
 .cbar .cin:disabled { opacity: .6; }
-.cbar label { display: flex; gap: 4px; align-items: center; color: var(--dim); font-size: 12px; white-space: nowrap; }
+.cbar label { display: flex; gap: 4px; align-items: center; color: var(--dim); font-size: 15px; white-space: nowrap; }
 .cbar button { padding: 1px 8px; }
 
 /* ---------------------------------------------------------------- jog */
@@ -347,22 +348,22 @@ button.warnb:hover { background: var(--warnb-hover); }
 .jbtn.moving, .jbtn.moving:hover { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
 .jkeys {
   display: none; margin-left: auto; padding: 1px 8px; border-radius: 9px; white-space: nowrap; min-width: 0; overflow: hidden;
-  font-size: 11px; font-weight: 600; background: var(--primary); color: #fff; cursor: default;
+  font-size: 13.75px; font-weight: 600; background: var(--primary); color: #fff; cursor: default;
 }
 .jog.keys .jkeys { display: block; }
-.jcap { flex: none; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 11px; color: var(--dim); }
+.jcap { flex: none; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13.75px; color: var(--dim); }
 .jcap > span { font-weight: 600; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
 .jcap b { font-weight: 500; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .jspeed { flex: none; display: flex; gap: 8px; align-items: center; margin-top: -4px; }
 .jspeed input[type=range] { flex: 1; min-width: 50px; margin: 0; accent-color: var(--accent-fill); }
 .jspeed input[type=number] { width: 58px; padding: 1px 4px; text-align: right; font-variant-numeric: tabular-nums; }
-.jspeed span { color: var(--dim); font-size: 12px; margin-left: -4px; }
+.jspeed span { color: var(--dim); font-size: 15px; margin-left: -4px; }
 /* the one part that gives way in a short panel (it scrolls), so the step buttons always show */
-.jnotes { flex: 0 1 auto; min-height: 0; overflow-y: auto; font-size: 12px; line-height: 1.35; }
+.jnotes { flex: 0 1 auto; min-height: 0; overflow-y: auto; font-size: 15px; line-height: 1.35; }
 .jmsg { color: var(--dim); }
 .jmsg.bad { color: var(--bad); }
 .jmsg.amber { color: var(--accent); }
-.jsoft, .jprobe { margin-top: 1px; font-size: 11px; }
+.jsoft, .jprobe { margin-top: 1px; font-size: 13.75px; }
 .jsteps { flex: none; display: flex; gap: 4px; margin-top: auto; }
 .jsteps button { flex: 1; min-width: 0; padding: 3px 0; font-variant-numeric: tabular-nums; }
 .jsteps button.on, .jsteps button.on:hover { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); font-weight: 600; }
@@ -380,14 +381,14 @@ button.warnb:hover { background: var(--warnb-hover); }
 .vbar .zs { font-weight: 500; min-width: 26px; }
 .stage { flex: 1; position: relative; min-height: 0; }
 .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.legend { position: absolute; right: 10px; bottom: 8px; font-size: 11px; color: var(--dim); display: flex; gap: 6px; align-items: center; pointer-events: none; }
+.legend { position: absolute; right: 10px; bottom: 8px; font-size: 13.75px; color: var(--dim); display: flex; gap: 6px; align-items: center; pointer-events: none; }
 .legend i { display: inline-block; width: 90px; height: 8px; border-radius: 2px; background: linear-gradient(90deg, var(--scan-low), var(--scan-mid), var(--scan-high)); }
-.hint { position: absolute; left: 10px; bottom: 8px; font-size: 11px; color: var(--hint); pointer-events: none; }
+.hint { position: absolute; left: 10px; bottom: 8px; font-size: 13.75px; color: var(--hint); pointer-events: none; }
 
 /* ---------------------------------------------------------------- editor (CodeMirror theme "fluid") */
 .editor { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
 .editor .CodeMirror { height: 100%; min-height: 0; min-width: 0; grid-row: 2; }
-.cm-s-fluid.CodeMirror { background: var(--bg); color: var(--text); font: 13px/1.45 ui-monospace, 'DejaVu Sans Mono', monospace; }
+.cm-s-fluid.CodeMirror { background: var(--bg); color: var(--text); font: 16.25px/1.45 ui-monospace, 'DejaVu Sans Mono', monospace; }
 .cm-s-fluid .CodeMirror-gutters { background: var(--cm-gutter); border-right: 1px solid var(--cm-gutter-line); }
 .cm-s-fluid .CodeMirror-scrollbar-filler, .cm-s-fluid .CodeMirror-gutter-filler { background: var(--bg); }
 .cm-s-fluid .CodeMirror-linenumber { color: var(--cm-linenumber); }
@@ -446,10 +447,10 @@ button.go:hover { background: var(--go-hover); }
 .mjobb .gl { font-style: normal; font-size: .9em; }
 @container (max-width: 250px) { .mjobb { flex-wrap: wrap; } }       /* narrow: they wrap, never cut short */
 /* (lower case and tight: a running job's count is long, and the file name gets what is left) */
-.mjlev { flex: none; font-size: 10px; font-weight: 700; padding: 0 4px; border-radius: 7px; background: var(--lit-bg); color: var(--lit-text); }
+.mjlev { flex: none; font-size: 12.5px; font-weight: 700; padding: 0 4px; border-radius: 7px; background: var(--lit-bg); color: var(--lit-text); }
 .movr {
   display: grid; grid-template-columns: auto repeat(2, minmax(0, auto)) minmax(36px, 1fr) repeat(3, minmax(0, auto));
-  gap: 1px 2px; align-items: center; margin: -2px 0 6px; font-size: 12px;
+  gap: 1px 2px; align-items: center; margin: -2px 0 6px; font-size: 15px;
 }
 /* (compact: at 1280x763, the launcher's window, the whole position still shows under it after a job) */
 /* (in a very narrow panel "Spindle (S)" wraps rather than pushing the buttons out) */
@@ -462,9 +463,9 @@ button.go:hover { background: var(--go-hover); }
 .movr .oval.pend { opacity: .7; }
 .movr .orap { grid-column: 2 / -1; display: flex; gap: 3px; }
 .movr .orap button { flex: 1 1 0; }
-.movr .onote { grid-column: 1 / -1; font-size: 11px; line-height: 1.3; }
+.movr .onote { grid-column: 1 / -1; font-size: 13.75px; line-height: 1.3; }
 .movr .onote > div { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.mjob { margin: -2px 0 6px; font-size: 12px; }
+.mjob { margin: -2px 0 6px; font-size: 15px; }
 .mjl { display: flex; gap: 5px; align-items: baseline; min-width: 0; }
 .mjname { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .mjstate { flex: none; white-space: nowrap; }
@@ -476,7 +477,7 @@ button.go:hover { background: var(--go-hover); }
 .mjcount { margin-left: auto; flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--dim); }
 .mjbar { height: 4px; margin-top: 3px; background: var(--track); border-radius: 2px; overflow: hidden; }
 .mjbar i { display: block; height: 100%; width: 0; background: var(--progress); }
-.mjwhy { margin-top: 2px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* (all of it in its tooltip) */
+.mjwhy { margin-top: 2px; font-size: 13.75px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* (all of it in its tooltip) */
 .mjwhy.bad { color: var(--bad); }
 .mjwhy.dim { color: var(--dim); }
 
@@ -484,14 +485,14 @@ button.go:hover { background: var(--go-hover); }
 .jog { container-type: inline-size; }
 .jtop { flex-wrap: wrap; row-gap: 4px; }
 .jgo { flex: 1 1 64px; min-width: 64px; max-width: 120px; align-self: stretch; display: flex; flex-direction: column; gap: 4px; }
-.jgo button { flex: 1; min-height: 30px; padding: 0 2px; font-size: 12px; line-height: 1.2; white-space: nowrap; }
-.jgo button .ts-label b { font-size: 13px; }
-.jgo button.armed .ts-ask { font-size: 11px; }     /* up to three lines: how far, Z up first, click again */
+.jgo button { flex: 1; min-height: 30px; padding: 0 2px; font-size: 15px; line-height: 1.2; white-space: nowrap; }
+.jgo button .ts-label b { font-size: 16.25px; }
+.jgo button.armed .ts-ask { font-size: 13.75px; }     /* up to three lines: how far, Z up first, click again */
 @container (max-width: 275px) {          /* no room beside the pad: one row under it */
   .jgo { flex: 1 1 100%; max-width: none; flex-direction: row; }
   .jgo button { min-height: 42px; }      /* (room for the three armed lines: an armed button never grows) */
   .jgo button br { display: none; }
-  .jgo button .ts-label b { font-size: 12px; margin-left: .3em; }
+  .jgo button .ts-label b { font-size: 15px; margin-left: .3em; }
 }
 .jcap .jkeys { margin: 0 auto 0 6px; text-transform: none; letter-spacing: 0; padding-block: 0; }   /* (no taller than its row:
    nothing below moves when it shows) */
@@ -499,7 +500,7 @@ button.go:hover { background: var(--go-hover); }
 .jcool .tog { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 3px 8px; white-space: nowrap; }
 .tog span { overflow: hidden; text-overflow: ellipsis; }
 .tog .lamp { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--lamp-off); }
-.tog small { margin-left: auto; font-size: 11px; color: var(--dim); }
+.tog small { margin-left: auto; font-size: 13.75px; color: var(--dim); }
 .tog.lit, .tog.lit:hover { background: var(--lit-bg); border-color: var(--lit-line); }
 .tog.lit .lamp { background: var(--lamp-on); box-shadow: 0 0 5px var(--lamp-on); }
 .tog.lit small { color: var(--lit-text); }
@@ -513,7 +514,7 @@ button.go:hover { background: var(--go-hover); }
 /* Scan panel: columns that wrap (Probe | Grid | Scan buttons + progress | Auto-level). Side by side in the wide,
    short bottom row (each column a few rows high, so nothing scrolls); stacked in a tall narrow panel. The flex
    bases are the narrowest each column's controls fit (ScanPanel.neededWidth() adds them up) */
-.scan { height: 100%; overflow-y: auto; background: var(--bg); font-size: 12px; line-height: 1.3; }
+.scan { height: 100%; overflow-y: auto; background: var(--bg); font-size: 15px; line-height: 1.3; }
 .scan.pad { padding: 5px 10px; }
 .scols { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 12px; }
 .scol { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -525,15 +526,15 @@ button.go:hover { background: var(--go-hover); }
 .scan select { min-width: 0; width: 100%; padding: 1px 3px; }
 .shead { display: flex; align-items: center; gap: 4px; min-height: 18px; }
 .shead > span, .shead > label {
-  flex: 1; min-width: 0; color: var(--dim); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+  flex: 1; min-width: 0; color: var(--dim); font-size: 13.75px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .shead button.sicon { flex: none; padding: 0 6px; line-height: 16px; }
-.spstate { font-size: 11px; line-height: 1.3; overflow-wrap: anywhere; }
+.spstate { font-size: 13.75px; line-height: 1.3; overflow-wrap: anywhere; }
 .spstate.amber { color: var(--accent); }
-.sdown { font-size: 11px; line-height: 1.3; font-weight: 600; }      /* the probe may be down: Home Probe (highlighted) first */
+.sdown { font-size: 13.75px; line-height: 1.3; font-weight: 600; }      /* the probe may be down: Home Probe (highlighted) first */
 .sgrid { display: grid; grid-template-columns: auto 1fr 1fr 1fr; gap: 3px 4px; align-items: center; }
-.sgrid b { font-size: 10px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; text-align: right; }
+.sgrid b { font-size: 12.5px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; text-align: right; }
 .sgrid > span { color: var(--accent); font-weight: 700; }
 .scan input[type=text] { min-width: 0; padding: 1px 4px; text-align: right; font-variant-numeric: tabular-nums; }
 .sgrid input { width: 100%; }
@@ -541,14 +542,14 @@ button.go:hover { background: var(--go-hover); }
 .sretract { display: flex; gap: 5px; align-items: center; }
 .sretract label, .lgrid label { color: var(--dim); white-space: nowrap; }
 .sretract input[type=text] { flex: 0 1 56px; width: 56px; }
-.scheck { font-size: 11px; line-height: 1.3; }
+.scheck { font-size: 13.75px; line-height: 1.3; }
 .scheck.bad { color: var(--bad); }
-.sprog { font-size: 11px; line-height: 1.3; white-space: pre-line; font-variant-numeric: tabular-nums; }
+.sprog { font-size: 13.75px; line-height: 1.3; white-space: pre-line; font-variant-numeric: tabular-nums; }
 .sbar { height: 4px; background: var(--track); border-radius: 2px; overflow: hidden; }
 .sbar i { display: block; height: 100%; width: 0; background: var(--good); }
 /* (at most 3 lines in their narrow column: the whole text in the tooltip, the status bar and the Console) */
 .smsg, .lmsg > div {
-  font-size: 11px; line-height: 1.3; overflow-wrap: anywhere;
+  font-size: 13.75px; line-height: 1.3; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
 }
 .lmsg > div { -webkit-line-clamp: 2; }
@@ -569,12 +570,12 @@ button.go:hover { background: var(--go-hover); }
    outside the scan in red), Show original / Save leveled G-code… / Leveling off */
 .ebanner {
   grid-row: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; padding: 4px 8px;
-  background: var(--banner-bg); border-bottom: 1px solid var(--banner-line); font-size: 12px; line-height: 1.3;
+  background: var(--banner-bg); border-bottom: 1px solid var(--banner-line); font-size: 15px; line-height: 1.3;
 }
 .ebanner .ebtext { flex: 1 1 240px; min-width: 0; }
 .ebanner .ebtext b { color: var(--banner-strong); letter-spacing: .04em; }
 .ebanner .ebtext.orig b { color: var(--accent); }
 .ebanner .ebbtns { flex: 0 1 auto; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
-.ebanner .ebbtns button { padding: 1px 7px; font-size: 12px; white-space: nowrap; }
-.ebanner .ebwarn { flex: 1 1 100%; min-width: 0; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ebanner .ebbtns button { padding: 1px 7px; font-size: 15px; white-space: nowrap; }
+.ebanner .ebwarn { flex: 1 1 100%; min-width: 0; font-size: 13.75px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ebanner .ebwarn.bad { color: var(--banner-bad); font-weight: 600; }
