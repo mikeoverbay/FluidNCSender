@@ -198,7 +198,7 @@ export class ScanPanel {
         <div class="smsg" hidden></div>
       </section>
       <section class="scol sc-level">
-        <div class="shead"><label for="levelSrc">Level the G-code with</label></div>
+        <div class="shead"><label for="levelSrc">Apply to G-code</label></div>
         <select id="levelSrc" data-f="lsrc" title="The scan the G-code is leveled with"></select>
         <div class="lgrid">
           <label for="levelZ" title="The Z of the G-code's surface: its Z 0 (the user's UGS: 0)">Z surface</label>
@@ -206,7 +206,8 @@ export class ScanPanel {
           <label for="levelArc" title="Arcs (G2 / G3) are cut into straight lines this long, so they follow the surface">Arc segment</label>
           ${box('id="levelArc" data-l="arcSegmentMm"')}<span class="dim">mm</span>
         </div>
-        <div class="lbtns"><button data-act="level" class="primary">Level</button><button data-act="unlevel">Leveling off</button></div>
+        <!-- one box: ticked = the G-code is leveled (it blinks red then); a click turns it on or off -->
+        <div class="lbtns"><button data-act="apply" class="lapply" aria-pressed="false"><i></i><span>Apply</span></button></div>
         <div class="lmsg dim" hidden></div>
         <button data-act="lsave">Save leveled G-code…</button>
       </section>
@@ -234,8 +235,7 @@ export class ScanPanel {
     this.btn.start.onclick = () => this.start();
     this.btn.stop.onclick = () => this.stop();
     this.btn.save.onclick = () => this.onSave?.();
-    this.btn.level.onclick = () => this.level();
-    this.btn.unlevel.onclick = () => this.onLevelOff?.();
+    this.btn.apply.onclick = () => (this.m?.lev?.active ? this.onLevelOff?.() : this.level());
     this.btn.lsave.onclick = () => this.onSaveLeveled?.();
     this.portSel.onchange = () => this.show();
     this.srcSel.onchange = () => this.sourceChosen();
@@ -550,17 +550,23 @@ export class ScanPanel {
     this.fillSources();
     const why = this.levelWhy();
     const b = this.btn;
-    setAttr(b.level, 'disabled', !!why);
-    setAttr(b.level, 'title', why ? `Level: ${why}` : `Level the G-code with ${this.levelSource()?.name || 'the scan'}: the leveled `
-      + 'program replaces the loaded one (Run runs it, the editor shows it). Nothing moves.');
     const on = !!lev.active;
-    const offWhy = !on ? 'the G-code is not leveled' : active ? 'not while a job is running' : running ? 'not while scanning' : lev.busy ? 'busy' : '';
-    setAttr(b.unlevel, 'disabled', !!offWhy);
-    setAttr(b.unlevel, 'title', offWhy ? `Leveling off: ${offWhy}` : 'Leveling off: back to the original G-code (Run runs that again)');
+    // Apply: one box. Off: a click levels the G-code with the chosen scan; on (blinking red): a click goes back
+    const offWhy = active ? 'not while a job is running' : running ? 'not while scanning' : lev.busy ? 'busy' : '';
+    const no = on ? offWhy : why;
+    setAttr(b.apply, 'disabled', !!no);
+    if (b.apply.getAttribute('aria-pressed') !== String(on)) b.apply.setAttribute('aria-pressed', String(on));
+    setAttr(b.apply, 'title', on
+      ? (no ? `Apply is ON: the G-code is leveled. Turning it off: ${no}`
+        : 'Apply is ON: the G-code is leveled (Run runs the leveled program). Click to turn it off: back to the original G-code.')
+      : (no ? `Apply: ${no}` : `Apply: level the G-code with ${this.levelSource()?.name || 'the scan'}: the leveled `
+        + 'program replaces the loaded one (Run runs it, the editor shows it). Nothing moves.'));
+    b.apply.classList.toggle('on', on);
+    const label = lev.busy ? (lev.busy === 'off' ? 'Turning off…' : 'Applying…') : on ? 'Apply: ON' : 'Apply';
+    if (b.apply.lastChild.textContent !== label) b.apply.lastChild.textContent = label;
     setAttr(b.lsave, 'disabled', !on || !lev.text);
     setAttr(b.lsave, 'title', on ? 'Save the leveled G-code as a file (default: <name>-autoleveled.gcode in the G-code\'s folder)'
       : 'Save leveled G-code…: once the G-code is leveled');
-    if (b.level.classList.contains('primary') === on) b.level.classList.toggle('primary', !on);
     for (const input of Object.values(this.lInputs)) setAttr(input, 'disabled', active || running);
     const c = checkLevelSettings(this.typedLevel());
     for (const [k, input] of Object.entries(this.lInputs)) input.classList.toggle('bad', c.key === k);
