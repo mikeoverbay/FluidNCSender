@@ -531,6 +531,8 @@ export class ScanPanel {
     if (lev.busy) return 'Leveling…';
     if (!m.prog || m.prog.state === 'none' || !m.prog.state) return 'Open a G-code file first';
     if (m.prog.state === 'error') return 'FluidSender refused the G-code (see the job line)';
+    // (a saved leveled G-code: the server refuses it too; Apply would add the scan's heights twice)
+    if (!lev.active && m.program?.preLeveled) return `Already leveled: ${m.program.preLeveled}. It runs as it is`;
     if (!this.levelSource()) return this.source === 'file' ? 'Choose a .xyz file' : 'No complete scan yet: scan first, or choose a .xyz file';
     const c = checkLevelSettings(this.typedLevel());
     return c.error || '';

@@ -886,6 +886,7 @@ const live = () => mach.link === 'up' && mach.connected;
 const NOT_LIVE = { status: null, modal: null, axes: null, jog: null, zeroUndo: null, alarm: null };
 
 function machineChanged() {
+  viewer.setPreLeveled(mach.program?.preLeveled);
   machinePanel.update(mach);
   jogPanel.update(mach);
   scanPanel.update(mach);
@@ -1140,6 +1141,9 @@ function levelNote() {
     return `\n\nLEVELED with ${levelName(info)}${arc}: the moves' Z follows the scanned surface.`
       + (cover ? `\nWarning: ${cover}.` : '') + more.map(w => `\nWarning: ${w}.`).join('');
   }
+  if (mach.program?.preLeveled) {
+    return `\n\nALREADY LEVELED: ${mach.program.preLeveled}. It runs as it is: the scan is not added again.`;
+  }
   if (scanDone(mach.scan)) {
     const s = mach.scan.settings;
     return `\n\nNOT leveled: the last scan${s ? ` (${s.xPoints} × ${s.yPoints} points)` : ''} is not applied to it `
@@ -1351,10 +1355,27 @@ function saveLeveledAs() {
   saveName.setSelectionRange(0, saveName.value.length - '.gcode'.length);
 }
 
+/** The leveled text with a header line that marks it as leveled already (after a first "%" line, if it has one):
+ *  FluidSender then never levels it again (leveling.py pre_leveled). ASCII and short: FluidNC 4.1.1 refuses lines
+ *  over 127 characters. */
+function markLeveled(text) {
+  const info = lev.info || {}, sc = info.stats?.scan || {};
+  const scan = levelName(info).replace(/ \(.*$/, '').replace(/[()]/g, '');
+  const pts = Number.isFinite(sc.xPoints) ? ` ${sc.xPoints}x${sc.yPoints} pts` : '';
+  const zs = Number.isFinite(info.zSurface) ? ` Zsurf ${+info.zSurface.toFixed(4)}` : '';
+  const d = new Date(), p2 = n => String(n).padStart(2, '0');
+  const when = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+  const mark = `(FluidSender: auto-leveled, do not level again: ${scan}${pts}${zs} ${when})`.replace(/[^\x20-\x7e]/g, '?');
+  const line = mark.length > 120 ? `${mark.slice(0, 119)})` : mark;
+  const nl = text.includes('\r\n') ? '\r\n' : '\n';
+  const first = /^%[^\n]*\n/.exec(text);
+  return first ? text.slice(0, first[0].length) + line + nl + text.slice(first[0].length) : line + nl + text;
+}
+
 async function saveLeveled(path) {
   if (!lev.active || !lev.text) return;
   try {
-    const res = await saveFile(path, lev.text);
+    const res = await saveFile(path, markLeveled(lev.text));
     status(`Saved the leveled G-code to ${res.path || path} (${Math.max(1, Math.round((res.size || lev.text.length) / 1024))} KB)`);
     addRecent(res.path || path);
   } catch (e) {
@@ -1501,7 +1522,7 @@ new MenuBar($('menubar'), [
       { separator: true },
       viewOpt('rapids', 'Show Rapids'),
       viewOpt('scan', 'Show Scan Surface'),
-      viewOpt('leveled', 'Leveled Toolpath', { enabled: () => viewer.scanUsable() && !viewer.levRect }),
+      viewOpt('leveled', 'Leveled Toolpath', { enabled: () => viewer.scanUsable() && !viewer.levRect && !viewer.preLeveled }),
       { separator: true },
       { label: 'Top View', action: () => { showPanel('viewer'); viewer.view('top'); } },
       { label: 'Iso View', action: () => { showPanel('viewer'); viewer.view('iso'); } },

@@ -54,6 +54,22 @@ CHANGED = "The G-code changed while it was being leveled: level it again"
 ANOTHER = "FluidSender connected to another FluidNC while the G-code was being leveled: level it again"
 
 
+# A saved leveled G-code: FluidSender's Save leveled G-code… writes LEVELED_MARK in its header, and it (like UGS's
+# Export) names it <name>-autoleveled.gcode. Leveling one again would add the scan's heights a second time.
+LEVELED_MARK = "(FluidSender: auto-leveled"
+AUTOLEVELED_NAME = re.compile(r"-autoleveled(?:\.[^./\\]*)?$", re.I)
+
+
+def pre_leveled(name, text):
+    """Why the G-code is a saved leveled one (its header has LEVELED_MARK, or its name ends in -autoleveled),
+    or None."""
+    if LEVELED_MARK in (text or "")[:4000]:
+        return "it is a saved leveled G-code (its header says so)"
+    if AUTOLEVELED_NAME.search(name or ""):
+        return "it is a saved leveled G-code (its name ends in -autoleveled)"
+    return None
+
+
 class LevelingError(Exception):
     """A refused level call or Run: the message is for the user, status the HTTP status (Machine raises it as a
     MachineError)."""
@@ -385,6 +401,11 @@ class Leveling:
                 text = self.loaded_text[1] if self.loaded_text and self.loaded_text[0] is program else None
             if text is None:
                 raise LevelingError("FluidSender doesn't have this G-code's text: open it again")
+            twice = pre_leveled(original.name, text)
+            if twice:
+                raise LevelingError(f"Not leveled again: {twice}, so the scan's heights are in it already and "
+                                    "Apply would add them twice. Run it as it is, or open the original G-code to "
+                                    "level it with a new scan.")
             scanner, setup = m.scanner, m.work_setup()
             self.busy = True
         try:                                # (not with the lock held: 55,000 lines take 2 s)

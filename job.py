@@ -51,6 +51,7 @@ class Program:
         self.name = name
         self.total = total              # lines in the file, as the editor counts them
         self.warnings = list(warnings)  # what FluidNC would do otherwise than the lines read (texts for the user)
+        self.pre_leveled = None         # why it is a saved leveled G-code (leveling.pre_leveled), or None
         self.numbers = array("I", numbers)
         self.data = "\n".join(texts)
         self.starts = array("I", accumulate(map(len, texts), lambda pos, n: pos + n + 1, initial=0))
@@ -65,7 +66,10 @@ class Program:
         return self.numbers[i], self.data[start:end]
 
     def info(self):
-        return {"name": self.name, "lines": len(self), "total": self.total, "warnings": list(self.warnings)}
+        info = {"name": self.name, "lines": len(self), "total": self.total, "warnings": list(self.warnings)}
+        if self.pre_leveled:
+            info["preLeveled"] = self.pre_leveled
+        return info
 
 
 def _bad_char(c):

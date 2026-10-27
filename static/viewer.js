@@ -82,6 +82,7 @@ export class Viewer {
     this.line = 0;
     this.lastLine = 0;
     this.levRect = null;     // a leveled program's scan area { x0, x1, y0, y1 }, or null (setLeveledProgram)
+    this.preLeveled = '';    // why the loaded G-code is a saved leveled one (its heights are in it), or ''
     this.layers = {};
     this.shown = { cut: null, rapid: null };
 
@@ -450,8 +451,21 @@ export class Viewer {
     if (fit) this.view('iso'); else this.render();
   }
 
+  /** why: the loaded G-code is a saved leveled one (the server's preLeveled), or '': the leveled view would add the
+   *  scan's heights a second time, so it is off meanwhile. */
+  setPreLeveled(why) {
+    why = why || '';
+    if (why === this.preLeveled) return;
+    this.preLeveled = why;
+    if (why && this.options.leveled) this.setOption('leveled', false);
+    this.syncBar();
+  }
+
   setOption(key, value) {
-    if (key === 'leveled' && value && this.levRect) {
+    if (key === 'leveled' && value && this.preLeveled) {
+      value = false;
+      this.onMessage?.(`This is ${this.preLeveled.replace(/^it is /, '')}: the toolpath shown has the scan's heights in it already.`);
+    } else if (key === 'leveled' && value && this.levRect) {
       value = false;
       this.onMessage?.('The G-code is leveled (Auto-level): the toolpath shown has the scan\'s heights in it already.');
     } else if (key === 'leveled' && value && !this.scanUsable()) {

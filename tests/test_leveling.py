@@ -255,6 +255,28 @@ class Leveled(tj.Stage3):
         return sent
 
 
+class NotTwice(Leveled):
+    """A saved leveled G-code (its header has FluidSender's mark, or its name ends in -autoleveled) is never leveled
+    again: Apply would add the scan's heights twice."""
+
+    WHY = ("Not leveled again: it is a saved leveled G-code ({}), so the scan's heights are in it already and Apply "
+           "would add them twice. Run it as it is, or open the original G-code to level it with a new scan.")
+
+    def test_marked_header_refused(self):
+        self.load("%\n(FluidSender: auto-leveled, do not level again: last-scan.xyz 3x2 pts)\n" + PROGRAM)
+        self.assertEqual(self.m.program.info()["preLeveled"], "it is a saved leveled G-code (its header says so)")
+        self.refused_level({"scan": "last"}, self.WHY.format("its header says so"))
+        self.assertIsNone(self.m.leveling.result(self.m.program))
+
+    def test_autoleveled_name_refused(self):
+        self.load(PROGRAM, name="t-autoleveled.gcode")
+        self.refused_level({"scan": "last"}, self.WHY.format("its name ends in -autoleveled"))
+
+    def test_original_still_levels(self):
+        self.assertNotIn("preLeveled", self.m.program.info())
+        self.assertEqual(self.level()["lines"], len(lines_of(leveled_text())))
+
+
 class Levels(Leveled):
     def test_run_sends_exactly_the_leveled_program(self):
         want = leveled_text()

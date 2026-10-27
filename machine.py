@@ -66,7 +66,7 @@ import traceback
 from collections import deque
 
 from job import WORD, WORDS, ProgramError, clock_text, coolant_after, coolant_words, parse_program
-from leveling import Leveling, LevelingError
+from leveling import Leveling, LevelingError, pre_leveled
 from settings import ZERO_KEEP, Settings, SettingsError, jog_feed, jog_step
 
 MM = 25.4
@@ -3523,6 +3523,7 @@ class Machine:
         if text:
             try:                            # (not with the lock held: a big file takes a while)
                 program = parse_program(name, text)
+                program.pre_leveled = pre_leveled(name, text)
             except ProgramError as e:
                 error = str(e)
         with self.lock:
