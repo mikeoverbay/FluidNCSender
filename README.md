@@ -12,8 +12,11 @@ Chrome app window. It is **inch-first** everywhere.
   Scan and Console. Drag panels around, float or maximize them (F11), and reset them from **View → Reset Layout**.
 - **Dark, Medium and Light themes** (View → Theme).
 - **G-code editor** synced with the 3D toolpath view. Save keeps the file's CRLF line endings.
+- **Visualizer:** Top / Iso / Front views; **Toolpath**, **Rapids**, **Scan** and **Leveled** checkboxes; a Z stretch;
+  and a **camera button** that saves the view as a PNG.
 - **Machine panel:** inch DRO, state badge, Hold / Resume / Soft Reset, Home ($H, $HX/$HY/$HZ), Unlock ($X),
-  Zero per axis or all, **Undo Zero** (the last 5 zeros are kept), Go to XY 0 / Z 0, and feed / rapid / spindle overrides.
+  Zero per axis or all, **Undo Zero** (the last 5 zeros are kept), Go to XY 0 / Z 0, and feed / rapid / spindle overrides
+  (amber when not 100 %).
 - **"2nd chance" buttons:** Zero and Go-to buttons need a second click 0.5–3 s after the first.
   Double-clicks and keyboard presses never count, so a bumped button does nothing.
 - **Jog panel:** 3×3 XY pad with diagonals, Z+/Z−, Stop, and steps of 10 / 1 / 0.1 / 0.01 / 0.001 in.
@@ -22,7 +25,8 @@ Chrome app window. It is **inch-first** everywhere.
 - **Job streaming** with character counting (128-byte buffer). Every job starts with `G20 G90`. It pauses on error,
   and **SAFE STOP** holds, waits for Hold:0, then resets.
 - **Surface scan** with a Z probe ("the nano"), in UGS's zigzag order and `.xyz` format.
-- **Auto-level** that matches UGS output byte for byte, with arcs split into short segments.
+- **Auto-level** that matches UGS output byte for byte, with arcs split into short segments. One **Apply** box
+  (blinks red while on). Saved leveled files are marked in their header and are **never leveled twice**.
 - **Bluetooth jog pendant** support (NANO_jogbox, UGS plugin protocol).
 - **Safe serial handling:** ports are opened exclusively and never opened by themselves. A port UGS holds is refused.
   The port is released 10 s after the last window closes, and only when the machine is at rest.

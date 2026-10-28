@@ -5,6 +5,8 @@
 - **Machine → Home All ($H)…**, or Home X / Y / Z: asks for confirmation first.
 - **Machine → Unlock ($X)** clears an alarm without homing. Only use it if you know where the machine is.
 - After an alarm that says *Reset to continue*, do **Soft Reset** first.
+- In the Machine panel, **Home ($H) / Home Z ($HZ) / Unlock ($X)** sit right under the X/Y/Z position
+  (in an alarm they move up under Run / Hold / Resume / Soft Reset).
 
 ## Jog panel
 

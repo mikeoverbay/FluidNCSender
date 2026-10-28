@@ -12,7 +12,17 @@ You can edit the file. **Save** (Ctrl+S) keeps its CRLF line endings, and **Save
 
 1. Home, then zero X, Y and Z ([guide 3](03-jog-and-zero.md)).
 2. If the surface isn't flat, scan and level ([guide 5](05-scan-and-level.md)).
-3. Check the toolpath in the viewer: Top / Front / Iso views are in the View menu.
+3. Check the toolpath in the visualizer (see below).
+
+## The visualizer
+
+- **Top / Iso / Front** set the view. Drag to rotate, right-drag to pan, wheel to zoom.
+- **Toolpath** shows or hides the cutting moves (G1/G2/G3); **Rapids** the rapid moves (G0); **Scan** the
+  scanned surface. Also in the View menu.
+- **Leveled** draws the toolpath with the scan's heights added (a preview only: it never changes what is sent).
+- **Z** stretches heights so small differences show.
+- The **camera button** at the right end saves a picture of the view as a PNG,
+  `<gcode name>-view-<date-time>.png`, in **Downloads**.
 
 ## Run
 
@@ -30,7 +40,7 @@ Progress shows in the Machine panel and on the pendant.
 | Action | What it does |
 |---|---|
 | **Hold (!)** | feed hold: it slows to a stop and keeps its place |
-| **Resume (~)** | carries on after a hold or an `M0` |
+| **Resume (~)** | carries on after a hold or an `M0`. Greyed for a moment after a Soft Reset, until FluidNC reports it is no longer held |
 | **Stop / SAFE STOP** | hold, wait until fully stopped (Hold:0), then soft reset. The job ends. |
 | **Soft Reset (Ctrl-X)…** | immediate reset. You may lose position, so re-home if it was moving. |
 
@@ -44,6 +54,7 @@ In the Machine panel:
 - **Rapid:** 100 / 50 / 25 % (G0)
 - **Spindle (S):** 10–200 %
 
+Any override not at 100 % shows in amber (for Rapid: its label and the chosen button).
 **Machine → Overrides to 100%** resets all three.
 
 ## Vacuum / AUX
