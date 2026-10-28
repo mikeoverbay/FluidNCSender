@@ -30,7 +30,7 @@
   --cm-linenum: #c6cad0; --cm-meta: #93e6f0; --cm-searching: rgba(110, 70, 0, .45);
   --cm-jobline: rgba(40, 90, 180, .4); --cm-jobgutter-bg: #3d6fc4; --cm-jobgutter-fg: #fff;
   --v-bg: #484c54; --v-grid-axis: #646971; --v-grid: #565a62; --v-rapid: #a3aec4; --v-cut-top: #f2c14e;
-  --v-cut-deep: #ff8452; --v-todo: #a8aeb8; --v-tool: #7fd4a0; --v-rect: #8fe0a0; --v-outside: #ff4fd8;
+  --v-cut-deep: #ff8452; --v-todo: #a8aeb8; --v-tool: #7fd4a0; --v-rect: #8fe0a0; --v-outside: #ff4fd8; --v-machine: #b4c0da; --v-home: #ffd04f;
   --v-hl: #4fd1ff; --v-axis-x: #ff7777; --v-axis-y: #5fe06f; --v-axis-z: #6aa8ff;
   --scan-low: #ff7468; --scan-mid: #e8c33d; --scan-high: #3cb455;
   --tab-bar: #3b3f45; --tab-active: #484c54; --tab-hidden: #43474e; --tab-divider: #3b3f45; --sash: #33363b;
@@ -65,7 +65,7 @@
   --cm-linenum: #5c6370; --cm-meta: #56b6c2; --cm-searching: rgba(232, 163, 61, .35);
   --cm-jobline: rgba(61, 123, 224, .28); --cm-jobgutter-bg: #3d7be0; --cm-jobgutter-fg: #cfe0ff;
   --v-bg: #1b1d21; --v-grid-axis: #3a3f48; --v-grid: #2a2e34; --v-rapid: #5d6b85; --v-cut-top: #f2c14e;
-  --v-cut-deep: #d9572b; --v-todo: #6a717c; --v-tool: #7fd4a0; --v-rect: #8fe0a0; --v-outside: #ff4fd8;
+  --v-cut-deep: #d9572b; --v-todo: #6a717c; --v-tool: #7fd4a0; --v-rect: #8fe0a0; --v-outside: #ff4fd8; --v-machine: #8a9bbd; --v-home: #ffd04f;
   --v-hl: #4fd1ff;                                   /* (no --v-axis-*: three.js's own axis colors) */
   --scan-low: #d23c32; --scan-mid: #e8c33d; --scan-high: #3cb455;
   color-scheme: dark;                                /* (dockview: its own dark theme) */
@@ -96,7 +96,7 @@
   --cm-linenum: #56616d; --cm-meta: #006570; --cm-searching: rgba(232, 163, 61, .3);
   --cm-jobline: rgba(61, 123, 224, .16); --cm-jobgutter-bg: #2f67b2; --cm-jobgutter-fg: #fff;
   --v-bg: #f4f5f7; --v-grid-axis: #b4bac3; --v-grid: #d8dce2; --v-rapid: #7787a8; --v-cut-top: #9c7300;
-  --v-cut-deep: #c63d1f; --v-todo: #7a818b; --v-tool: #1f9d55; --v-rect: #1f8a3c; --v-outside: #d6249f;
+  --v-cut-deep: #c63d1f; --v-todo: #7a818b; --v-tool: #1f9d55; --v-rect: #1f8a3c; --v-outside: #d6249f; --v-machine: #5a6a8c; --v-home: #c98a00;
   --v-hl: #0091d5; --v-axis-x: #d32f2f; --v-axis-y: #2e7d32; --v-axis-z: #1565c0;
   --scan-low: #d23c32; --scan-mid: #a88000; --scan-high: #2e9d48;
   --tab-bar: #e4e7eb; --tab-active: #f4f5f7; --tab-hidden: #eaedf0; --tab-divider: #d3d7dd; --sash: #c9ced5;
@@ -379,6 +379,10 @@ button.warnb:hover { background: var(--warnb-hover); }
 .vbar .sep { width: 1px; height: 16px; background: var(--line); }
 .vbar .zs { font-weight: 500; min-width: 26px; }
 .vbar .vshot { margin-left: auto; padding: 1px 5px; display: flex; align-items: center; }   /* (right end) */
+.vbar .vgear { padding: 1px 5px; }
+.mbox { border-collapse: collapse; margin: 10px 0; }
+.mbox th, .mbox td { padding: 3px 6px; text-align: left; }
+.mbox input[type=number] { width: 80px; }
 .stage { flex: 1; position: relative; min-height: 0; }
 .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .legend { position: absolute; right: 10px; bottom: 8px; font-size: 11px; color: var(--dim); display: flex; gap: 6px; align-items: center; pointer-events: none; }

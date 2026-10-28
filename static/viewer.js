@@ -15,10 +15,14 @@ const COLORS = {
   bg: ['--v-bg', 0x1b1d21], gridAxis: ['--v-grid-axis', 0x3a3f48], grid: ['--v-grid', 0x2a2e34],
   rapid: ['--v-rapid', 0x5d6b85], cutTop: ['--v-cut-top', 0xf2c14e], cutDeep: ['--v-cut-deep', 0xd9572b],
   todo: ['--v-todo', 0x6a717c], tool: ['--v-tool', 0x7fd4a0], rect: ['--v-rect', 0x8fe0a0],
-  outside: ['--v-outside', 0xff4fd8], hl: ['--v-hl', 0x4fd1ff],
+  outside: ['--v-outside', 0xff4fd8], hl: ['--v-hl', 0x4fd1ff], machine: ['--v-machine', 0x8a9bbd],
+  home: ['--v-home', 0xffd04f],
   low: ['--scan-low', 0xd23c32], mid: ['--scan-mid', 0xe8c33d], high: ['--scan-high', 0x3cb455],
   axisX: ['--v-axis-x', null], axisY: ['--v-axis-y', null], axisZ: ['--v-axis-z', null],
 };
+// The machine box's defaults (inches): the travel per axis, the end each axis homes to ('min' or 'max'), and the
+// machine position FluidNC gives that end when it homes (FluidNC: max_travel_mm, homing/positive_direction, mpos_mm)
+export const MACHINE_DEFAULTS = { size: [24, 24, 4], home: ['min', 'max', 'max'], homeAt: [0, 0, 0] };
 const AXES = [1, 0, 0, 1, 0.6, 0, 0, 1, 0, 0.6, 1, 0, 0, 0, 1, 0, 0.6, 1];     // three.js's AxesHelper colors
 
 function themeColors() {
@@ -76,7 +80,9 @@ function levelSegments(src, srcLine, height) {
 
 export class Viewer {
   constructor() {
-    this.options = { toolpath: true, rapids: true, scan: true, leveled: false, zscale: 1 };
+    this.options = { toolpath: true, rapids: true, scan: true, leveled: false, machine: true, zscale: 1 };
+    this.machine = MACHINE_DEFAULTS;   // the machine box's settings (setMachine)
+    this.wco = [0, 0, 0];              // the work offset (machine position of the work zero, in), setWco
     this.job = null;
     this.scan = null;
     this.line = 0;
@@ -96,6 +102,8 @@ export class Viewer {
       <label><input type="checkbox" data-opt="rapids"> Rapids</label>
       <label><input type="checkbox" data-opt="scan"> Scan</label>
       <label title="Show the toolpath with the scan heights added"><input type="checkbox" data-opt="leveled"> Leveled</label>
+      <label title="Show the machine's travel (the box) and its home corner (the dot)"><input type="checkbox" data-opt="machine"> Machine</label>
+      <button class="vgear" data-act="machine" title="Machine box settings: travel, home corner">⚙</button>
       <span class="sep"></span>
       <label title="Stretch heights to make small differences visible">Z <input type="range" data-opt="zscale" min="1" max="40" value="1"> <b class="zs">1×</b></label>
       <button class="vshot" data-act="shot" title="Save a picture of this view (PNG, in Downloads)"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M9 4 7.2 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.2L15 4H9Zm3 4.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/></svg></button>`);
@@ -110,6 +118,7 @@ export class Viewer {
       const v = e.target.dataset?.view;
       if (v) this.view(v);
       if (e.target.closest?.('[data-act=shot]')) this.snapshot();
+      if (e.target.closest?.('[data-act=machine]')) this.onMachineSettings?.();
     });
     this.bar.addEventListener('input', e => {
       const k = e.target.dataset?.opt;
@@ -136,6 +145,7 @@ export class Viewer {
 
     new ResizeObserver(() => this.resize()).observe(this.stage);
     this.buildFloor();
+    this.buildMachine();
     this.view('iso');
   }
 
@@ -210,6 +220,7 @@ export class Viewer {
     if (this.layers.surface) this.colorScan();
     this.layers.rect?.material.color.copy(this.col.rect);
     if (this.tool) setColors(this.tool.geometry, this.toolColors(this.tool.geometry));
+    this.buildMachine();
     this.render();
   }
 
@@ -375,6 +386,54 @@ export class Viewer {
     this.render();
   }
 
+  // ---------------------------------------------------------------- machine box
+
+  /** The machine's travel in machine coordinates: { lo: [x, y, z], hi: [x, y, z], home: [x, y, z] }. */
+  machineBox(m = this.machine) {
+    const lo = [], hi = [], home = [];
+    for (let i = 0; i < 3; i++) {
+      const at = m.homeAt[i], size = m.size[i];
+      if (m.home[i] === 'max') { lo.push(at - size); hi.push(at); } else { lo.push(at); hi.push(at + size); }
+      home.push(at);
+    }
+    return { lo, hi, home };
+  }
+
+  /** The box is drawn in machine coordinates and moved by the work offset, so it sits where the table is. */
+  buildMachine() {
+    this.dispose(this.layers.machine);
+    this.layers.machine = null;
+    const { lo, hi, home } = this.machineBox();
+    const geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]));
+    geo.translate((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2);
+    const box = new THREE.LineSegments(geo, new THREE.LineDashedMaterial({ color: this.col.machine, dashSize: 0.4, gapSize: 0.25 }));
+    box.computeLineDistances();
+    const dotGeo = new THREE.BufferGeometry();
+    dotGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(home), 3));
+    const dot = new THREE.Points(dotGeo, new THREE.PointsMaterial({ color: this.col.home, size: 10, sizeAttenuation: false }));
+    const group = new THREE.Group();
+    group.add(box, dot);
+    group.position.set(-this.wco[0], -this.wco[1], -this.wco[2]);
+    group.visible = this.options.machine;
+    this.layers.machine = group;
+    this.world.add(group);
+  }
+
+  /** m: { size, home, homeAt } as MACHINE_DEFAULTS. */
+  setMachine(m) {
+    this.machine = m;
+    this.buildMachine();
+    this.render();
+  }
+
+  /** The work offset in inches (MPos - WPos), from FluidNC's status. */
+  setWco(wco) {
+    if (wco.every((v, i) => Math.abs(v - this.wco[i]) < 1e-6)) return;
+    this.wco = wco.slice(0, 3);
+    this.layers.machine?.position.set(-this.wco[0], -this.wco[1], -this.wco[2]);
+    this.render();
+  }
+
   // ---------------------------------------------------------------- tool marker
 
   /** Shows the tool at a work position in inches (the tip of a cone pointing down). setTool(null) hides it. */
@@ -498,6 +557,7 @@ export class Viewer {
     if (key === 'toolpath' && this.layers.cut) this.layers.cut.visible = value;
     if (key === 'rapids' && this.layers.rapid) this.layers.rapid.visible = value;
     if (key === 'scan' && this.layers.surface) this.layers.surface.visible = value;
+    if (key === 'machine' && this.layers.machine) { this.layers.machine.visible = value; this.onMachineShown?.(value); }
     if (key === 'leveled') { this.buildJob(); this.highlight(this.line, this.lastLine); }
     if (key === 'zscale') this.world.scale.z = value;
     this.syncBar();
@@ -529,9 +589,14 @@ export class Viewer {
       box.expandByPoint(new THREE.Vector3(this.levRect.x0, this.levRect.y0, 0));
       box.expandByPoint(new THREE.Vector3(this.levRect.x1, this.levRect.y1, 0));
     }
-    if (box.isEmpty()) {           // nothing loaded: an area around the work origin, and the tool if it is shown
+    if (box.isEmpty()) {           // nothing loaded: an area around the work origin, the tool and the machine if shown
       box.set(new THREE.Vector3(-1, -1, -1), new THREE.Vector3(9, 9, 1));
       if (this.tool?.visible) box.expandByPoint(new THREE.Vector3(...this.toolAt));
+      if (this.options.machine) {
+        const { lo, hi } = this.machineBox();
+        box.expandByPoint(new THREE.Vector3(...lo).sub(new THREE.Vector3(...this.wco)));
+        box.expandByPoint(new THREE.Vector3(...hi).sub(new THREE.Vector3(...this.wco)));
+      }
     }
     box.min.z *= this.world.scale.z;
     box.max.z *= this.world.scale.z;

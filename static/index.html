@@ -257,5 +257,35 @@
   </div>
   <div class="dfoot"><span class="grow"></span><button data-act="cancel" class="primary">Close</button></div>
 </dialog>
+
+<dialog id="mboxDlg" class="dlg small">
+  <div class="dhead">Machine box (visualizer)</div>
+  <div class="dbody pad">
+    <label><input type="checkbox" data-f="show"> Show the machine box in the visualizer</label>
+    <table class="mbox">
+      <tr><th></th><th>Travel (in)</th><th>Homes to</th><th>Home MPos (in)</th></tr>
+      <tr><th>X</th><td><input type="number" step="0.1" min="0.1" data-f="size0"></td>
+        <td><select data-f="home0"><option value="min">Left (−X end)</option><option value="max">Right (+X end)</option></select></td>
+        <td><input type="number" step="0.01" data-f="at0"></td></tr>
+      <tr><th>Y</th><td><input type="number" step="0.1" min="0.1" data-f="size1"></td>
+        <td><select data-f="home1"><option value="min">Front (−Y end)</option><option value="max">Back (+Y end)</option></select></td>
+        <td><input type="number" step="0.01" data-f="at1"></td></tr>
+      <tr><th>Z</th><td><input type="number" step="0.1" min="0.1" data-f="size2"></td>
+        <td><select data-f="home2"><option value="min">Bottom (−Z end)</option><option value="max">Top (+Z end)</option></select></td>
+        <td><input type="number" step="0.01" data-f="at2"></td></tr>
+    </table>
+    <p class="cmsg err" hidden></p>
+    <p class="dim">The dashed box is the machine's travel, the dot its home corner. It is placed with the work offset
+    (MPos − WPos) from FluidNC's status, so it follows when you zero; while not connected it uses the last offset
+    seen. In FluidNC's config these are each axis's max_travel_mm, homing/positive_direction (true: homes to the +
+    end) and homing/mpos_mm (÷ 25.4 for inches). Only the view uses them: nothing is sent to FluidNC.</p>
+  </div>
+  <div class="dfoot">
+    <button data-act="defaults">Defaults</button>
+    <span class="grow"></span>
+    <button data-act="cancel">Cancel</button>
+    <button data-act="ok" class="primary">OK</button>
+  </div>
+</dialog>
 </body>
 </html>
