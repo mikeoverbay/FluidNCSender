@@ -34,4 +34,4 @@ if ! curl -s -o /dev/null "$URL/"; then
     nohup python3 "$DIR/server.py" --no-browser --port "$PORT" >/dev/null 2>&1 &
     for i in $(seq 20); do curl -s -o /dev/null "$URL/" && break; sleep 0.1; done
 fi
-exec google-chrome --app="$URL/" --window-size=1280,800 "$@"
+exec "${FLUIDSENDER_BROWSER:-google-chrome}" --app="$URL/" --window-size=1280,800 "$@"
