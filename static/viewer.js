@@ -76,7 +76,7 @@ function levelSegments(src, srcLine, height) {
 
 export class Viewer {
   constructor() {
-    this.options = { rapids: true, scan: true, leveled: false, zscale: 1 };
+    this.options = { toolpath: true, rapids: true, scan: true, leveled: false, zscale: 1 };
     this.job = null;
     this.scan = null;
     this.line = 0;
@@ -92,11 +92,13 @@ export class Viewer {
       <button data-view="iso" title="3D view">Iso</button>
       <button data-view="front" title="View from the front">Front</button>
       <span class="sep"></span>
+      <label title="Show the cutting moves (G1, G2, G3)"><input type="checkbox" data-opt="toolpath"> Toolpath</label>
       <label><input type="checkbox" data-opt="rapids"> Rapids</label>
       <label><input type="checkbox" data-opt="scan"> Scan</label>
       <label title="Show the toolpath with the scan heights added"><input type="checkbox" data-opt="leveled"> Leveled</label>
       <span class="sep"></span>
-      <label title="Stretch heights to make small differences visible">Z <input type="range" data-opt="zscale" min="1" max="40" value="1"> <b class="zs">1×</b></label>`);
+      <label title="Stretch heights to make small differences visible">Z <input type="range" data-opt="zscale" min="1" max="40" value="1"> <b class="zs">1×</b></label>
+      <button class="vshot" data-act="shot" title="Save a picture of this view (PNG, in Downloads)"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M9 4 7.2 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.2L15 4H9Zm3 4.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/></svg></button>`);
     this.stage = el('div', 'stage');
     this.canvas = el('canvas');
     this.legend = el('div', 'legend', 'scan low <i></i> high');
@@ -107,6 +109,7 @@ export class Viewer {
     this.bar.addEventListener('click', e => {
       const v = e.target.dataset?.view;
       if (v) this.view(v);
+      if (e.target.closest?.('[data-act=shot]')) this.snapshot();
     });
     this.bar.addEventListener('input', e => {
       const k = e.target.dataset?.opt;
@@ -151,6 +154,23 @@ export class Viewer {
       if (this.tool?.visible) this.placeTool();
       this.renderer.render(this.scene, this.camera);
     });
+  }
+
+  /** Saves what the view shows as a PNG (the browser's download, so ~/Downloads), named after the G-code
+   *  (shotName(), set by the app). Drawn here and read at once: the canvas keeps no picture after a frame. */
+  snapshot() {
+    if (!(this.canvas.width > 0 && this.canvas.height > 0)) return;
+    if (this.tool?.visible) this.placeTool();
+    this.renderer.render(this.scene, this.camera);
+    const url = this.canvas.toDataURL('image/png');
+    const d = new Date(), p2 = n => String(n).padStart(2, '0');
+    const stamp = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+    const base = String(this.shotName?.() || 'toolpath').replace(/\.[^./]*$/, '').replace(/[^\w.-]+/g, '_') || 'toolpath';
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${base}-view-${stamp}.png`;
+    a.click();
+    this.onMessage?.(`Saved a picture of the view: ${a.download} (in Downloads)`);
   }
 
   resize() {
@@ -259,6 +279,7 @@ export class Viewer {
 
     this.layers.cut = this.lines(this.shown.cut.pos, this.cutColor(), new THREE.LineBasicMaterial({ vertexColors: true }));
     this.layers.rapid = this.lines(this.shown.rapid.pos, null, new THREE.LineBasicMaterial({ color: this.col.rapid }));
+    this.layers.cut.visible = this.options.toolpath;
     this.layers.rapid.visible = this.options.rapids;
     this.world.add(this.layers.cut, this.layers.rapid);
   }
@@ -474,6 +495,7 @@ export class Viewer {
         : 'Load a scan (.xyz) to see the leveled toolpath.');
     }
     this.options[key] = value;
+    if (key === 'toolpath' && this.layers.cut) this.layers.cut.visible = value;
     if (key === 'rapids' && this.layers.rapid) this.layers.rapid.visible = value;
     if (key === 'scan' && this.layers.surface) this.layers.surface.visible = value;
     if (key === 'leveled') { this.buildJob(); this.highlight(this.line, this.lastLine); }

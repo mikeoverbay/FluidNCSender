@@ -370,14 +370,15 @@ button.warnb:hover { background: var(--warnb-hover); }
 /* ---------------------------------------------------------------- visualizer */
 .viewer { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
 .vbar {
-  flex: none; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 3px 6px;
+  flex: none; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 3px 5px;
   border-bottom: 1px solid var(--line); background: var(--panel); user-select: none;
 }
-.vbar button { padding: 1px 8px; }
-.vbar label { display: flex; gap: 4px; align-items: center; }
-.vbar input[type=range] { width: 90px; }
+.vbar button { padding: 1px 6px; }
+.vbar label { display: flex; gap: 3px; align-items: center; }
+.vbar input[type=range] { width: 56px; }
 .vbar .sep { width: 1px; height: 16px; background: var(--line); }
 .vbar .zs { font-weight: 500; min-width: 26px; }
+.vbar .vshot { margin-left: auto; padding: 1px 5px; display: flex; align-items: center; }   /* (right end) */
 .stage { flex: 1; position: relative; min-height: 0; }
 .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .legend { position: absolute; right: 10px; bottom: 8px; font-size: 11px; color: var(--dim); display: flex; gap: 6px; align-items: center; pointer-events: none; }

@@ -86,6 +86,7 @@ function status(text, kind = '') {
   konsole.write(text, kind);
 }
 viewer.onMessage = text => status(text);
+viewer.shotName = () => gcodeName() || prog.name;      // (the screenshot button's file name)
 onThemeChange(() => viewer.recolor());      // (the rest of the page follows the theme by itself: style.css)
 
 function gcodeName() {
@@ -1520,6 +1521,7 @@ new MenuBar($('menubar'), [
       panelItem('scan', 'Scan'),
       panelItem('console', 'Console'),
       { separator: true },
+      viewOpt('toolpath', 'Show Toolpath'),
       viewOpt('rapids', 'Show Rapids'),
       viewOpt('scan', 'Show Scan Surface'),
       viewOpt('leveled', 'Leveled Toolpath', { enabled: () => viewer.scanUsable() && !viewer.levRect && !viewer.preLeveled }),
