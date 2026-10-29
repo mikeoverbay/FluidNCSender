@@ -56,7 +56,7 @@ export class FileBrowser {
     }
     for (const f of data.files.filter(f => this.filter(f.name))) {
       const path = this.dir + '/' + f.name;
-      const row = this.row(f.name, f.name.toLowerCase().endsWith('.xyz') ? 'scan' : '',
+      const row = this.row(f.name, f.name.toLowerCase().endsWith('.xyz') ? 'xyz' : '',
         `${fmtSize(f.size)} · ${fmtDate(f.mtime)}`);
       row.dataset.path = path;
       if (this.marked.has(path)) row.classList.add('on');

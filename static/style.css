@@ -226,7 +226,7 @@ input[type=text]:focus, input[type=number]:focus, select:focus { outline: none; 
 .frow small { color: var(--dim); font-size: 11px; white-space: nowrap; }
 .frow:hover { background: var(--raised); }
 .frow.dir span { color: var(--accent); }
-.frow.scan span { color: var(--file-scan); }
+.frow.xyz span { color: var(--file-scan); }
 .frow.on { background: var(--file-on); }
 .frow.sel { background: var(--sel); }
 .frow.empty { color: var(--dim); cursor: default; }
