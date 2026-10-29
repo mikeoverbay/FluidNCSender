@@ -191,7 +191,8 @@ class Store:
         self.data[key] = value
 
 
-SMALL = {"minX": 1.0, "maxX": 2.0, "minY": 0.5, "maxY": 1.0, "xPoints": 3, "yPoints": 2, "zRetract": 0.25}
+SMALL = {"minX": 1.0, "maxX": 2.0, "minY": 0.5, "maxY": 1.0, "xPoints": 3, "yPoints": 2, "zRetract": 0.25,
+         "probeOffX": 0.0, "probeOffY": 0.0}
 
 
 class ScanCase(unittest.TestCase):
@@ -270,7 +271,11 @@ class ScanCase(unittest.TestCase):
 class Settings(unittest.TestCase):
     def test_defaults_are_the_users_ugs_settings(self):
         self.assertEqual(check_settings(), {"minX": 0.5, "minY": 1.0, "maxX": 8.5, "maxY": 12.0, "xPoints": 15,
-                                            "yPoints": 5, "zRetract": 0.2})
+                                            "yPoints": 5, "zRetract": 0.2, "probeOffX": 0.0, "probeOffY": 0.0})
+        self.assertEqual(check_settings({"probeOffY": "-3"})["probeOffY"], -3.0)
+        with self.assertRaises(MachineError) as cm:
+            check_settings({"probeOffY": 13})
+        self.assertEqual(str(cm.exception), "Probe offset Y must be from -12 to 12 in")
 
     def test_some_over_the_saved_ones(self):
         saved = dict(SMALL)
@@ -402,6 +407,17 @@ class Scans(ScanCase):
         self.assertEqual(phases[-1], "done")
         self.assertEqual(set(states[-1]), {"running", "phase", "point", "points", "at", "lastZ", "settings", "result",
                                            "error", "message", "savedTo", "started", "finished"})
+
+    def test_probe_offset(self):
+        """The probe sits 3 in toward -Y from the bit (the user's): the bit goes 3 in further in +Y, and the grid
+        and the file stay where the probe touched (the job's coordinates), so X/Y zero never has to move."""
+        st = self.run_scan(dict(SMALL, probeOffY=-3.0))
+        self.assert_ended("done")
+        self.assertEqual(self.machine.move_list(), [(1.0, 3.5), (1.0, 3.5), (1.0, 4.0), (1.5, 4.0), (1.5, 3.5),
+                                                    (2.0, 3.5), (2.0, 4.0), (1.0, 3.5)])
+        self.assertEqual((st["result"]["xs"], st["result"]["ys"]), ([1.0, 1.5, 2.0], [0.5, 1.0]))
+        self.assertTrue(st["result"]["text"].startswith("# minX=1.00000 maxX=2.00000\n# minY=0.50000 maxY=1.00000\n"))
+        self.assertIn(("info", "Scan point 2 of 6: X1.0000 Y1.0000 Z0.0100"), self.logs)
 
     def test_move_timeouts_like_ugs(self):
         self.run_scan()

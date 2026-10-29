@@ -4,7 +4,8 @@ FLUIDSENDER_SETTINGS names another file; the tests use a temporary one).
 
 Python standard library only. Keys:
     "jog"          {"step": 0.1, "feed": 150}: the jog step (in) and speed (in/min) the page and the pendant share
-    "scan"         the surface scan settings (inches): minX, minY, maxX, maxY, xPoints, yPoints, zRetract
+    "scan"         the surface scan settings (inches): minX, minY, maxX, maxY, xPoints, yPoints, zRetract, and
+                   probeOffX / probeOffY, where the probe sits from the spindle centerline (the user's: Y -3)
     "probePort"    the probe's port when it was last connected (or null)
     "pendantPort"  the pendant's port when it was last connected (or null)
     "zeros"        Undo Zero's records, oldest first: the last 5 zeros (page or pendant), each with the work
@@ -33,7 +34,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 STEPS = (10, 1, 0.1, 0.01, 0.001)           # the jog steps there are buttons for (inches)
 MAX_FEED = 10000.0                          # in/min: any jog speed above this is a mistake
 JOG = {"step": 0.1, "feed": 150}            # the user's UGS settings: 0.1 in at 150 in/min
-SCAN = {"minX": 0.5, "minY": 1.0, "maxX": 8.5, "maxY": 12.0, "xPoints": 15, "yPoints": 5, "zRetract": 0.2}
+SCAN = {"minX": 0.5, "minY": 1.0, "maxX": 8.5, "maxY": 12.0, "xPoints": 15, "yPoints": 5, "zRetract": 0.2,
+        "probeOffX": 0.0, "probeOffY": 0.0}
+MAX_OFFSET = 12.0                           # in: the probe's offset from the spindle centerline (the user's: Y -3)
 MAX_POINTS = 100                            # per axis
 MAX_TOTAL = 2000                            # points in a scan
 MAX_COORD = 100.0                           # in: a scan corner further out is a mistake
@@ -121,6 +124,11 @@ def check_scan(value):
             raise SettingsError(f"Scan: min {axis} must be below max {axis} (the same only with 1 point in {axis})")
     if out["xPoints"] * out["yPoints"] > MAX_TOTAL:
         raise SettingsError(f"Scan: {out['xPoints'] * out['yPoints']} points; at most {MAX_TOTAL}")
+    for key in ("probeOffX", "probeOffY"):          # (0 when missing: files from before the probe offset)
+        v = _number(value.get(key, 0.0))
+        if v is None or abs(v) > MAX_OFFSET:
+            raise SettingsError(f"Scan {key}: a number from -{MAX_OFFSET:g} to {MAX_OFFSET:g} in")
+        out[key] = v
     return out
 
 

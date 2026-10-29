@@ -64,16 +64,27 @@ name), FluidSender treats it as **already leveled**:
 
 To level with a new scan, open the original G-code instead.
 
-### The probe offset: shift Y, scan, put Y back
+### The probe offset: offset the start corner, never move the zero
 
-The probe sits 3 in from the bit in Y. To scan where the bit will cut:
+The probe sits **3 in toward −Y** from the spindle centerline. Don't shift X/Y zero to scan. Set **Offset from
+spindle** in the Scan panel's **Probe** section instead (it is saved in settings.json), and the scan offsets the
+start corner for you and shifts every point back to the spindle centerline:
 
-1. Zero the job with the bit as usual (zero Z on the surface at the scan's first point, Min X / Min Y,
+1. Zero X, Y and Z with the bit as usual (zero Z on the surface at the scan's first point, Min X / Min Y,
    for the most exact depth: the scan's heights are relative to that first touch).
-2. Jog the bit to **Y +3** and **Zero Y** there, so the probe is over the job's coordinates.
-3. **Start Scan**.
-4. Put Y back: **Undo Zero** (exact), or jog to Y −3 and Zero Y.
-5. **Apply**. A note says *X/Y zero moved since the scan (Y by +3.0000 in)*: that is expected here.
+2. In the Probe section set **Offset from spindle X 0, Y −3** (once: it is remembered).
+3. Set **Min / Max X and Y to the job's own area**, where the bit will cut (for example X 1–8, Y 1–11.5).
+4. **Start Scan**. The bit goes to Y + 3 (here Y 4–14.5) so the probe lands on that area. The saved scan is
+   in the job's coordinates, ready to level.
+5. **Apply**, then **Run**. Don't re-zero X, Y or Z between the scan and the end of the job.
 
-If X/Y zero has changed since the scan, Apply **warns with the amount but still levels**. Only a different work
-coordinate system (G55, etc.) is refused. If you forget step 4, the leveling is off by the amount the note shows.
+**Why:** a leveled G-code has the scan's heights built in at fixed X/Y spots. Re-zero X or Y after leveling and
+the heights land in the wrong places: the cut has high and low spots that aren't on the stock. If you must
+re-zero, open the original G-code and level it again.
+
+With the offset at 0, 0 you would have to type the box 3 in higher in Y, and the saved scan would then be 3 in
+off in Y for leveling (high spots in the wrong places). Use the offset.
+
+The old way (jog to Y +3, Zero Y, scan, put Y back) still works but is easy to get wrong. If X/Y zero has
+changed since the scan, Apply **warns with the amount but still levels**. Only a different work coordinate system
+(G55, etc.) is refused.

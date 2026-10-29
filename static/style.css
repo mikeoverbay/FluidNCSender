@@ -542,6 +542,9 @@ button.go:hover { background: var(--go-hover); }
 .sretract { display: flex; gap: 5px; align-items: center; }
 .sretract label, .lgrid label { color: var(--dim); white-space: nowrap; }
 .sretract input[type=text] { flex: 0 1 56px; width: 56px; }
+.soffset { flex-wrap: wrap; row-gap: 2px; }
+.soffset label { flex-basis: 100%; }
+.soffset input[type=text] { flex: 1 1 36px; width: 36px; min-width: 0; }
 .scheck { font-size: 11px; line-height: 1.3; }
 .scheck.bad { color: var(--bad); }
 .sprog { font-size: 11px; line-height: 1.3; white-space: pre-line; font-variant-numeric: tabular-nums; }

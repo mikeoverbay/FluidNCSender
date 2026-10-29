@@ -2201,7 +2201,8 @@ class EndToEnd(unittest.TestCase):
         temporary one here), read again by the next server."""
         self.assertEqual(self.call("/api/machine/jogsettings", {"step": 0.01, "feed": 75}),
                          (200, {"ok": True, "step": 0.01, "feed": 75}))
-        scan = {"minX": 0.25, "minY": 0.5, "maxX": 4.0, "maxY": 3.0, "xPoints": 7, "yPoints": 4, "zRetract": 0.15}
+        scan = {"minX": 0.25, "minY": 0.5, "maxX": 4.0, "maxY": 3.0, "xPoints": 7, "yPoints": 4, "zRetract": 0.15,
+                "probeOffX": 0.0, "probeOffY": -3.0}       # (the probe offset from the spindle is kept too)
         st, data = self.call("/api/scan/settings", scan)
         self.assertEqual((st, data), (200, {"ok": True, "settings": scan}))
         st, data = self.call("/api/pendant/connect", {"port": self.pendant.path})

@@ -182,6 +182,13 @@
         loaded (they still run): an M7 or M8 whose line ends in a number like F100.1 turns AUX or the vacuum OFF, so
         put M7 / M8 on a line of its own. FluidNC 4.1.1 refuses G-code lines over 127 characters (FluidSender says
         which line when the file is loaded)</td></tr>
+      <tr><td>Scan: probe offset</td><td>The probe sits 3 in toward −Y from the bit. Don't move X/Y zero to scan: in the Scan
+        panel's Probe section set Offset from spindle to X 0, Y −3 (it is saved) and type Min / Max as the job's own area
+        (where the bit cuts). The scan offsets the start corner by itself (the bit goes to Y + 3) and saves every point
+        shifted back to the spindle centerline, in the job's coordinates, ready to level.
+        Don't re-zero X, Y or Z between the scan and the end of the job: a leveled G-code has the heights built in at
+        fixed X/Y spots, so a new zero puts them in the wrong places (high spots). If you must, level the original
+        G-code again</td></tr>
       <tr><td>Overrides</td><td>Machine panel, under the job: Feed, Spindle (S) and Rapid, at once, also during a job or
         a hold (FluidNC's realtime overrides; mouse only). Feed: the cutting moves (G1, G2, G3), 10 to 200 % in steps
         of 1 and 10, or back to 100 %. Spindle: the S the same way; under it the S now (and the programmed S). An

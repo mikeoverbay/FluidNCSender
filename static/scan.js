@@ -26,10 +26,12 @@ import { jobActive } from './machine.js';
 import { mouseOnly } from './twostep.js';
 import { probeMayBeDown } from './jog.js';
 
-const DEFAULTS = { minX: 0.5, minY: 1.0, maxX: 8.5, maxY: 12.0, xPoints: 15, yPoints: 5, zRetract: 0.2 };   // the user's UGS settings
+// (the user's UGS settings; the probe offset is where the probe sits from the bit: theirs is Y -3)
+const DEFAULTS = { minX: 0.5, minY: 1.0, maxX: 8.5, maxY: 12.0, xPoints: 15, yPoints: 5, zRetract: 0.2, probeOffX: 0, probeOffY: 0 };
 const KEYS = Object.keys(DEFAULTS);
-const LABEL = { minX: 'Min X', minY: 'Min Y', maxX: 'Max X', maxY: 'Max Y', xPoints: 'Points X', yPoints: 'Points Y', zRetract: 'Z retract' };
-const MAX_POINTS = 100, MAX_TOTAL = 2000, MAX_COORD = 100;     // (the server's limits)
+const LABEL = { minX: 'Min X', minY: 'Min Y', maxX: 'Max X', maxY: 'Max Y', xPoints: 'Points X', yPoints: 'Points Y', zRetract: 'Z retract',
+  probeOffX: 'Probe offset X', probeOffY: 'Probe offset Y' };
+const MAX_POINTS = 100, MAX_TOTAL = 2000, MAX_COORD = 100, MAX_OFFSET = 12;     // (the server's limits)
 const SAVE_SETTINGS_MS = 600;     // settings typed here are saved on the server this long after the last change
 // Ports the probe is never on (the server refuses them): FluidNC's kind (USB serial) and the pendant's (Bluetooth)
 const NOT_PROBE = { 'usb-serial': 'FluidNC\'s kind of port', bluetooth: 'the pendant\'s kind of port' };
@@ -68,6 +70,9 @@ export function checkSettings(s) {
   }
   if (v.xPoints * v.yPoints > MAX_TOTAL) return { error: `${v.xPoints * v.yPoints} points: at most ${MAX_TOTAL}`, key: 'xPoints' };
   if (v.zRetract < 0.01 || v.zRetract > 2) return { error: 'Z retract: from 0.01 to 2 in', key: 'zRetract' };
+  for (const k of ['probeOffX', 'probeOffY']) {
+    if (Math.abs(v[k]) > MAX_OFFSET) return { error: `${LABEL[k]}: from -${MAX_OFFSET} to ${MAX_OFFSET} in`, key: k };
+  }
   return { settings: v };
 }
 
@@ -173,6 +178,9 @@ export class ScanPanel {
         <select id="scanPort" data-f="port" aria-label="The probe's serial port"></select>
         <button data-act="pconn">Connect</button>
         <button data-act="home" title="Home the probe (H): it retracts fully. Its first touch after that reads 0.0.">Home Probe</button>
+        <div class="sretract soffset" title="Where the probe sits from the spindle centerline (yours: Y -3, 3 in toward -Y). Saved. Min / Max are the job's own area; the bit moves by the opposite so the probe lands there, and the scan is saved at the spindle centerline's coordinates. Leave X/Y zero where the job is zeroed.">
+          <label for="scanOffY">Offset from spindle</label><span class="dim">X</span>${box('id="scanOffX" data-k="probeOffX" aria-label="Probe offset X"')}<span class="dim">Y</span>${box('id="scanOffY" data-k="probeOffY" aria-label="Probe offset Y"')}<span class="dim">in</span>
+        </div>
         <div class="spstate dim"></div>
         <div class="sdown amber" hidden></div>
       </section>

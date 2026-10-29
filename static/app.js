@@ -1237,6 +1237,8 @@ function startScan(settings) {
   if (!confirm(`Start the surface scan?\n\n${n} points (${s.xPoints} × ${s.yPoints}) over X ${s.minX} … ${s.maxX} and Y ${s.minY} … ${s.maxY} in. `
     + 'The machine moves (G0, rapid) to each point, in X and Y only: its Z does not move, so make sure the bit clears the work '
     + `and the clamps. At each point the probe goes down to the surface and back up ${s.zRetract} in.\n\n`
+    + (s.probeOffX || s.probeOffY ? `Probe offset X ${s.probeOffX} Y ${s.probeOffY} in: the bit goes to X ${s.minX - s.probeOffX} … ${s.maxX - s.probeOffX} `
+      + `and Y ${s.minY - s.probeOffY} … ${s.maxY - s.probeOffY} so the probe lands on the area above.\n\n` : '')
     + 'Stop (or Soft Reset) stops it.')) return;
   return machineCall('Start Scan', () => machine.scanStart(settings));
 }

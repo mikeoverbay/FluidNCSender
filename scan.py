@@ -33,13 +33,15 @@ from machine import SAFE_Z, MachineError, fixed
 from probe import NO_HOME_REPLY, ProbeAborted, ProbeError, ProbeOverTravel, java_fixed
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULTS = {"minX": 0.5, "minY": 1.0, "maxX": 8.5, "maxY": 12.0, "xPoints": 15, "yPoints": 5, "zRetract": 0.2}
+DEFAULTS = {"minX": 0.5, "minY": 1.0, "maxX": 8.5, "maxY": 12.0, "xPoints": 15, "yPoints": 5, "zRetract": 0.2,
+            "probeOffX": 0.0, "probeOffY": 0.0}
 LABELS = {"minX": "Min X", "minY": "Min Y", "maxX": "Max X", "maxY": "Max Y", "xPoints": "Points X",
-          "yPoints": "Points Y", "zRetract": "Z retract"}
+          "yPoints": "Points Y", "zRetract": "Z retract", "probeOffX": "Probe offset X", "probeOffY": "Probe offset Y"}
 MAX_AXIS_POINTS = 100
 MAX_POINTS = 2000
 ZR_MIN, ZR_MAX = 0.01, 2.0
 MAX_COORD = 100.0       # in: no work position further out than this is meant
+MAX_OFFSET = 12.0       # in: the probe's offset from the bit, at most this (the user's is Y -3: 3 in toward -Y)
 MOVE_MIN = 15.0         # s: a move to the next point may take this long at least (UGS) ...
 RAPID = 50.0            # ... or 3x its time at this speed (in/min; FluidNC's max rates if known) + 2 s
 FAR = 50.0              # in: the distance to assume when the start position isn't known
@@ -95,6 +97,10 @@ def check_settings(data=None, base=None):
     out["zRetract"] = _number(out["zRetract"], "zRetract")
     if not ZR_MIN <= out["zRetract"] <= ZR_MAX:
         raise MachineError(f"Z retract must be from {ZR_MIN:g} to {ZR_MAX:g} in")
+    for key in ("probeOffX", "probeOffY"):
+        out[key] = _number(out[key], key)
+        if abs(out[key]) > MAX_OFFSET:
+            raise MachineError(f"{LABELS[key]} must be from -{MAX_OFFSET:g} to {MAX_OFFSET:g} in")
     return out
 
 
@@ -511,6 +517,12 @@ class Scanner:
             r = None
         return r / 100.0 if _real(r) and 0 < r <= 100 else 1.0
 
+    def bit_at(self, x, y):
+        """Where the bit goes so the probe lands on grid point (x, y): the probe sits (probeOffX, probeOffY) from the
+        bit, so the grid and the saved file are where the probe touches, in the job's own coordinates."""
+        s = self.settings
+        return x - s.get("probeOffX", 0.0), y - s.get("probeOffY", 0.0)
+
     def move(self, x, y):
         """machine.scan_move to (x, y), with UGS's timeout: 3x the expected time + 2 s, 15 s at least. The time counts
         with FluidNC's rapid override (see rapid)."""
@@ -528,17 +540,19 @@ class Scanner:
         total = len(order)
         self.rate, self.pos = self.where()
         self.log("info", f"Scan: {s['xPoints']} x {s['yPoints']} = {total} points, X {s['minX']:.4f} to "
-                         f"{s['maxX']:.4f}, Y {s['minY']:.4f} to {s['maxY']:.4f} in, Z retract {s['zRetract']:.3f} in")
+                         f"{s['maxX']:.4f}, Y {s['minY']:.4f} to {s['maxY']:.4f} in, Z retract {s['zRetract']:.3f} in"
+                         + (f", probe offset X {s['probeOffX']:+.4f} Y {s['probeOffY']:+.4f} in (the bit goes the "
+                            "opposite way)" if s.get("probeOffX") or s.get("probeOffY") else ""))
         try:
             try:
                 self.check()
                 self.set(phase="moving", at={"n": 1, "x": xs[0], "y": ys[0]})
-                self.move(xs[0], ys[0])         # to the first point (UGS: moveToSafeStartPoint)
+                self.move(*self.bit_at(xs[0], ys[0]))         # to the first point (UGS: moveToSafeStartPoint)
                 for n, (i, j) in enumerate(order, 1):
                     x, y = xs[i], ys[j]
                     self.check()
                     self.set(phase="moving", at={"n": n, "x": x, "y": y})
-                    self.move(x, y)
+                    self.move(*self.bit_at(x, y))
                     self.check()
                     self.set(phase="probing")
                     try:
@@ -584,7 +598,7 @@ class Scanner:
                     raise RuntimeError(f"Unexpected probe response on final retract (H): {r}")
                 self.check()
                 self.set(phase="returning", at={"n": 1, "x": xs[0], "y": ys[0]})
-                self.move(xs[0], ys[0])
+                self.move(*self.bit_at(xs[0], ys[0]))
             except Exception as e:
                 if self.stopped(e):
                     return "stopped", STOPPED_DONE
