@@ -19,7 +19,6 @@ You can edit the file. **Save** (Ctrl+S) keeps its CRLF line endings, and **Save
 - **Top / Iso / Front** set the view. Drag to rotate, right-drag to pan, wheel to zoom.
 - **Toolpath** shows or hides the cutting moves (G1/G2/G3); **Rapids** the rapid moves (G0); **Scan** the
   scanned surface. Also in the View menu.
-- **Leveled** draws the toolpath with the scan's heights added (a preview only: it never changes what is sent).
 - **Z** stretches heights so small differences show.
 - The **camera button** at the right end saves a picture of the view as a PNG,
   `<gcode name>-view-<date-time>.png`, in **Downloads**.

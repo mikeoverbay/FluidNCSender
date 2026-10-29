@@ -76,6 +76,8 @@ function levelSegments(src, srcLine, height) {
 
 export class Viewer {
   constructor() {
+    // (leveled: the old "Leveled" preview, the scan's heights added here; its checkbox is gone, Apply shows the real
+    // leveled toolpath, so it stays off)
     this.options = { toolpath: true, rapids: true, scan: true, leveled: false, zscale: 1 };
     this.job = null;
     this.scan = null;
@@ -95,7 +97,6 @@ export class Viewer {
       <label title="Show the cutting moves (G1, G2, G3)"><input type="checkbox" data-opt="toolpath"> Toolpath</label>
       <label><input type="checkbox" data-opt="rapids"> Rapids</label>
       <label><input type="checkbox" data-opt="scan"> Scan</label>
-      <label title="Show the toolpath with the scan heights added"><input type="checkbox" data-opt="leveled"> Leveled</label>
       <span class="sep"></span>
       <label title="Stretch heights to make small differences visible">Z <input type="range" data-opt="zscale" min="1" max="40" value="1"> <b class="zs">1×</b></label>
       <button class="vshot" data-act="shot" title="Save a picture of this view (PNG, in Downloads)"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M9 4 7.2 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.2L15 4H9Zm3 4.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/></svg></button>`);
@@ -510,10 +511,6 @@ export class Viewer {
       if (input.type === 'checkbox') input.checked = v; else input.value = v;
     }
     this.bar.querySelector('.zs').textContent = this.options.zscale + '×';
-    const lev = this.bar.querySelector('[data-opt=leveled]');
-    lev.disabled = !!this.levRect;
-    lev.parentElement.title = this.levRect ? 'The G-code is leveled (Auto-level): the toolpath shown is the leveled one, the '
-      + 'scan\'s area is the dashed rectangle, and moves outside it are pink' : 'Show the toolpath with the scan heights added';
   }
 
   // ---------------------------------------------------------------- camera

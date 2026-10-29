@@ -72,7 +72,6 @@ name), FluidSender treats it as **already leveled**:
 
 - both **Apply** boxes are greyed (their tooltips say why), and the server refuses to level it;
 - Run's question says **ALREADY LEVELED: … It runs as it is**;
-- the visualizer's **Leveled** checkbox stays off (it would draw the heights twice).
 
 To level with a new scan, open the original G-code instead.
 

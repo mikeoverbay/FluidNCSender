@@ -12,7 +12,7 @@ Chrome app window. It is **inch-first** everywhere.
   Scan and Console. Drag panels around, float or maximize them (F11), and reset them from **View → Reset Layout**.
 - **Dark, Medium and Light themes** (View → Theme).
 - **G-code editor** synced with the 3D toolpath view. Save keeps the file's CRLF line endings.
-- **Visualizer:** Top / Iso / Front views; **Toolpath**, **Rapids**, **Scan** and **Leveled** checkboxes; a Z stretch;
+- **Visualizer:** Top / Iso / Front views; **Toolpath**, **Rapids** and **Scan** checkboxes; a Z stretch;
   and a **camera button** that saves the view as a PNG.
 - **Machine panel:** inch DRO, state badge, Hold / Resume / Soft Reset, Home ($H, $HX/$HY/$HZ), Unlock ($X),
   Zero per axis or all, **Undo Zero** (the last 5 zeros are kept), Go to XY 0 / Z 0, and feed / rapid / spindle overrides

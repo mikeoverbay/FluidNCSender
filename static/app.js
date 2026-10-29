@@ -1540,7 +1540,6 @@ new MenuBar($('menubar'), [
       viewOpt('toolpath', 'Show Toolpath'),
       viewOpt('rapids', 'Show Rapids'),
       viewOpt('scan', 'Show Scan Surface'),
-      viewOpt('leveled', 'Leveled Toolpath', { enabled: () => viewer.scanUsable() && !viewer.levRect && !viewer.preLeveled }),
       { separator: true },
       { label: 'Top View', action: () => { showPanel('viewer'); viewer.view('top'); } },
       { label: 'Iso View', action: () => { showPanel('viewer'); viewer.view('iso'); } },
@@ -1662,7 +1661,6 @@ machine.start();      // follows the server's machine state; it never opens a po
     urlFile = false;
     adoptProgram();                 // (it could not be opened: the server's then)
   }
-  if (params.has('leveled') && state.scan) viewer.setOption('leveled', true);
   if (params.get('line')) { showPanel('editor'); editor.goToLine(+params.get('line')); }
   if (PANELS[params.get('panel')]) showPanel(params.get('panel'));      // for screenshots: show a panel
   if (params.get('menu')) {         // for screenshots: open a menu
