@@ -41,16 +41,17 @@ example next to the job. Open a saved scan with **File → Open…** (any `.xyz`
    **Arc segment** (mm) is the length G2/G3 arcs are cut into, 0.1 by default, so arcs follow the surface too.
 3. Under **Apply to G-code** (or **Tools → Auto-level…** to get there) there are two boxes, and **only one can be
    on**:
-   - **Apply last scan**: levels with the scan just made here.
-   - **Apply file…**: opens the file dialog; the `.xyz` you pick levels the G-code at once.
+   - **Apply loaded scan (name)**: levels with the scan on screen: the scan just made here, or a `.xyz` you
+     opened with **File → Open…** (or by clicking it in the Files panel). Its label names that scan.
+   - **Apply .xyz file to G-code…**: opens the file dialog; the `.xyz` you pick levels the G-code at once.
 
-   The one that is on **blinks bright red and names its scan** (*Last scan (30 × 30): ON* or
-   *File scan.xyz: ON*). Click it again to go back to the original G-code. Click the other box to level with that
-   scan instead. If more than a quarter of the G-code is outside the scan, a red **⚠ WRONG SCAN?** line says so,
-   and Run's question does too.
+   The one that is on **blinks bright red and names its scan** (*Loaded scan scan.xyz: ON*, or *other.xyz: ON*).
+   Click it again to go back to the original G-code. Click the other box to level with that scan instead. If more
+   than a quarter of the G-code is outside the scan, a red **⚠ WRONG SCAN?** line says so, and Run's question
+   does too.
 
-   To only **look** at a scan, open it with **File → Open…** (or click it in the Files panel): that draws it in
-   the visualizer (the **Scan** checkbox) and levels nothing.
+   Opening a scan only draws it in the visualizer (the **Scan** checkbox); nothing is leveled until you click
+   **Apply loaded scan**.
 4. **Save leveled G-code…** writes the leveled file (default `<name>-autoleveled.gcode`). Or just **Run**: while
    Apply is on, the leveled version is what gets sent, and Run's question says **LEVELED**.
 

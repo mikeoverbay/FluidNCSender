@@ -231,8 +231,8 @@ export class ScanPanel {
         <!-- two boxes, only one on: the last scan, or a .xyz file. On = the G-code is leveled with that one (it
              blinks red, named); a click on it turns leveling off, a click on the other switches to that source -->
         <div class="lbtns lsrcs">
-          <button data-act="apply" class="lapply" aria-pressed="false"><i></i><span>Apply last scan</span></button>
-          <button data-act="applyf" class="lapply" aria-pressed="false"><i></i><span>Apply file…</span></button>
+          <button data-act="apply" class="lapply" aria-pressed="false"><i></i><span>Apply loaded scan</span></button>
+          <button data-act="applyf" class="lapply" aria-pressed="false"><i></i><span>Apply .xyz file to G-code…</span></button>
         </div>
         <div class="lmsg dim" hidden></div>
         <button data-act="lsave">Save leveled G-code…</button>
@@ -262,7 +262,7 @@ export class ScanPanel {
     this.btn.stop.onclick = () => this.stop();
     this.btn.save.onclick = () => this.onSave?.();
     // (only one on: a click on the one that is on turns leveling off; on the other, levels with that source)
-    this.btn.apply.onclick = () => (this.activeSource() === 'last' ? this.onLevelOff?.() : this.level('last'));
+    this.btn.apply.onclick = () => (this.activeSource() === 'loaded' ? this.onLevelOff?.() : this.level('loaded'));
     this.btn.applyf.onclick = () => (this.activeSource() === 'file' ? this.onLevelOff?.() : this.onPickScan?.());
     this.btn.lsave.onclick = () => this.onSaveLeveled?.();
     this.portSel.onchange = () => this.show();
@@ -503,7 +503,17 @@ export class ScanPanel {
     }
   }
 
-  /** A .xyz file was picked for leveling (the app's file dialog, from Apply file…): level with it now. */
+  /** The scan on screen (the app says): { kind: 'last' } (the last scan made here), { kind: 'file', path } (a .xyz
+   *  opened) or null. Apply loaded scan levels with it. */
+  setLoaded(loaded) {
+    const key = JSON.stringify(loaded || null);
+    if (key === this.loadedKey) return;
+    this.loadedKey = key;
+    this.loaded = loaded || null;
+    this.show();
+  }
+
+  /** A .xyz file was picked for leveling (the app's file dialog, from Apply .xyz file…): level with it now. */
   levelFile(path) {
     if (!path) return;
     this.scanFile = path;
@@ -511,18 +521,21 @@ export class ScanPanel {
     this.level('file');
   }
 
-  /** The source the G-code is leveled with now: 'last', 'file' or null (not leveled). The server names it:
-   *  "last-scan.xyz" for the last scan, the .xyz's path for a file. */
+  /** The source the G-code is leveled with now: 'loaded' (the scan on screen), 'file' (another one) or null (not
+   *  leveled). The server names it: "last-scan.xyz" for the last scan, the .xyz's path for a file. */
   activeSource() {
     const lev = this.m?.lev || {};
     if (!lev.active) return null;
-    return /[\\/]/.test(String(lev.info?.scan ?? '')) ? 'file' : 'last';
+    const used = String(lev.info?.scan ?? ''), path = /[\\/]/.test(used), l = this.loaded;
+    return l && (path ? l.kind === 'file' && l.path === used : l.kind === 'last') ? 'loaded' : 'file';
   }
 
   /** The scan a level with this source uses: 'last' or { path }, and its name; null if there is none. */
   levelSource(source) {
     if (source === 'file') return this.scanFile ? { scan: { path: this.scanFile }, name: baseName(this.scanFile) } : null;
-    return scanDone(this.m.scan) ? { scan: 'last', name: 'the last scan' } : null;
+    const l = this.loaded;
+    if (l?.kind === 'file') return { scan: { path: l.path }, name: baseName(l.path) };
+    return l?.kind === 'last' && scanDone(this.m.scan) ? { scan: 'last', name: 'the last scan' } : null;
   }
 
   /** Why Level can't go now ('' when it can). */
@@ -559,8 +572,9 @@ export class ScanPanel {
     // it turns leveling off, a click on the other levels with that source instead
     const offWhy = active ? 'not while a job is running' : running ? 'not while scanning' : lev.busy ? 'busy' : '';
     const src = this.activeSource();
-    const fileName = baseName(String(src === 'file' ? lev.info?.scan || '' : this.scanFile || ''));
+    const used = String(lev.info?.scan ?? ''), usedName = /[\\/]/.test(used) ? baseName(used) : 'last scan';
     const done = scanDone(m.scan), pts = done && m.scan?.settings ? ` (${m.scan.settings.xPoints} × ${m.scan.settings.yPoints})` : '';
+    const l = this.loaded, loadedName = l?.kind === 'file' ? baseName(l.path) : l?.kind === 'last' ? `last scan${pts}` : '';
     const box = (btn, me, noSource, offLabel, onLabel, what) => {
       const isOn = src === me;
       const no = isOn ? offWhy : (why || noSource);
@@ -575,9 +589,12 @@ export class ScanPanel {
       const label = isOn && lev.busy === 'off' ? 'Turning off…' : isOn ? onLabel : offLabel;
       if (btn.lastChild.textContent !== label) btn.lastChild.textContent = label;
     };
-    box(b.apply, 'last', done ? '' : 'no complete scan yet: scan first', 'Apply last scan', `Last scan${pts}: ON`, `the last scan${pts}`);
-    box(b.applyf, 'file', '', 'Apply file…', `File ${fileName}: ON`,
-      src === 'file' ? fileName : 'a .xyz file you choose (the file dialog opens)');    setAttr(b.lsave, 'disabled', !on || !lev.text);
+    box(b.apply, 'loaded', this.levelSource('loaded') ? '' : 'no scan loaded: scan, or open a .xyz (File → Open)',
+      loadedName ? `Apply loaded scan (${loadedName})` : 'Apply loaded scan', `Loaded scan ${loadedName}: ON`,
+      loadedName ? `the scan on screen, ${loadedName}` : 'the scan on screen');
+    box(b.applyf, 'file', '', 'Apply .xyz file to G-code…', `${usedName}: ON`,
+      src === 'file' ? usedName : 'a .xyz file you choose (the file dialog opens)');
+    setAttr(b.lsave, 'disabled', !on || !lev.text);
     setAttr(b.lsave, 'title', on ? 'Save the leveled G-code as a file (default: <name>-autoleveled.gcode in the G-code\'s folder)'
       : 'Save leveled G-code…: once the G-code is leveled');
     for (const input of Object.values(this.lInputs)) setAttr(input, 'disabled', active || running);

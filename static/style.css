@@ -564,7 +564,8 @@ button.go:hover { background: var(--go-hover); }
 .lgrid input[type=text] { width: 100%; }
 .lbtns { display: flex; gap: 4px; }
 .lbtns.lsrcs { flex-direction: column; }
-.lbtns button { flex: 1 1 auto; min-width: 0; padding: 2px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lbtns.lsrcs .lapply { justify-content: flex-start; }
+.lbtns.lsrcs .lapply span { overflow: hidden; text-overflow: ellipsis; }.lbtns button { flex: 1 1 auto; min-width: 0; padding: 2px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Apply: a tick box; ON blinks bright red (the G-code that runs is the leveled one) */
 .lapply { display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600; }
 .lapply i { flex: none; width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 2px; box-sizing: border-box; }

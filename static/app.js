@@ -113,6 +113,9 @@ function refreshTitles() {
   $('sfile').textContent = name ? `${name}${dirty ? ' (modified)' : ''}` : 'No file';
   info.update(state.job, state.scan, name, state.scanPath ? baseName(state.scanPath) : state.scanLabel);
   files.mark([state.gcodePath, state.scanPath]);
+  // The scan on screen is what Apply loaded scan levels with: the last scan made here, or a .xyz opened
+  scanPanel.setLoaded(state.liveScan ? (state.scan && !state.scan.partial ? { kind: 'last' } : null)
+    : state.scanPath ? { kind: 'file', path: state.scanPath } : null);
 }
 
 // ------------------------------------------------------------------ dock layout
