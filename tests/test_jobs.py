@@ -2541,7 +2541,8 @@ class SettingsFile(unittest.TestCase):
 
     def test_scan_settings_checked(self):
         s = settings.Settings()
-        ok = dict(settings.SCAN)
+        self.assertEqual(s.set("scan", dict(settings.SCAN)), settings.SCAN)     # (a first run's all-0 area: kept)
+        ok = dict(settings.SCAN, minX=0.5, minY=1.0, maxX=8.5, maxY=12.0, probeOffY=3.0)
         self.assertEqual(s.set("scan", ok), ok)
         self.assertEqual(s.update("scan", {"xPoints": 9.0})["xPoints"], 9)
         self.assertEqual(s.get("scan"), dict(ok, xPoints=9))
