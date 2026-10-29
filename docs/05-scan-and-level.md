@@ -25,12 +25,13 @@ at 115200 baud. Its commands are:
    - **Z retract** (in): how high to lift between points, 0.2 by default
 4. **Start Scan**. The scan is **refused if work Z is below 0.2 in**, so the bit can't be dragged.
    It probes in UGS's zigzag order, and the progress shows the point number and the last Z.
-5. **Stop** aborts the scan and the probe at once.
+5. **Stop** aborts the scan and the probe at once, then **homes the probe (H)** by itself, so its tip goes up
+   without anyone having to remember. If the probe doesn't confirm, the message says so: home it before moving.
 
 The result auto-saves to `scans/last-scan.xyz` in UGS `.xyz` format. **File → Save Scan…** saves a copy, for
 example next to the job. Open a saved scan with **File → Open…** (any `.xyz` file); **Close Scan** removes it.
 
-> Until the probe is homed again after a scan Stop, abort or failed home, its tip may still be down.
+> If the probe could not be homed (an abort, or a home that failed), its tip may still be down.
 > FluidSender warns before X/Y moves.
 
 ## Apply the scan (level)

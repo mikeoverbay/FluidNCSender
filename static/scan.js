@@ -6,7 +6,7 @@
 // and probe each point; the points show in the visualizer as they come. The finished scan is kept by the
 // server (scans/last-scan.xyz); Save Scan… writes it where you like, in the UGS .xyz format.
 //
-// A probe that is connected but not homed (a scan Stop or an abort leaves it so) may have its tip down: the
+// A probe that is connected but not homed (an abort or a failed home leaves it so; a scan Stop homes it) may have its tip down: the
 // panel says so and Home Probe is highlighted. No key presses Start Scan or Home Probe (mouseOnly). While
 // the panel is hidden behind another tab it is not redrawn (the status comes 5 times a second): shown()
 // brings it up to date.

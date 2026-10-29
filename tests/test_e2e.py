@@ -1666,10 +1666,11 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(self.call("/api/scan/stop", {}), (200, {"ok": True, "stopped": True}))
         s, _ = ev.wait(scan_phase("stopped", "failed", "done"), since=k, timeout=10, what="the scan stopped")
         self.assertEqual((s["scan"]["phase"], s["scan"]["error"]),
-                         ("stopped", "Scan stopped. Home the probe before scanning again."))
+                         ("stopped", "Scan stopped. Probe retracted (homed)."))
         self.wait_for(lambda: [e for e in probe.entries(plog0) if e.get("abort") == "P"], 3, "the touch stopped")
         self.assertEqual(self.realtime_names(sim, log0), [])     # the CNC stood still: nothing to stop
-        self.assertFalse(self.state()["probe"]["ready"])
+        self.wait_for(lambda: [e for e in probe.entries(plog0) if e.get("cmd") == "H"], 3, "the probe homed")
+        self.assertTrue(self.state()["probe"]["ready"])         # (the Stop homed it: nobody has to remember)
 
         st, data = self.call("/api/probe/home", {})
         self.assertEqual((st, data["probe"]["ready"]), (200, True))
@@ -1745,12 +1746,12 @@ class EndToEnd(unittest.TestCase):
         t_stop = time.monotonic()
         s = self.state()
         self.assertEqual((s["scan"]["phase"], s["scan"]["error"]),
-                         ("stopped", "Scan stopped. Home the probe before scanning again."))
+                         ("stopped", "Scan stopped. Probe retracted (homed)."))
         self.wait_for(lambda: [e for e in probe.entries(plog0) if e.get("abort") == "P"], 3, "the touch stopped")
         self.assertEqual({k: s["probe"][k] for k in ("connected", "ready", "mayBeDown")},
-                         {"connected": True, "ready": False, "mayBeDown": True})
+                         {"connected": True, "ready": True, "mayBeDown": False})     # (the Stop homed it)
 
-        # at rest: FluidNC first, then the pendant and the probe; the console says the probe may be down
+        # at rest: FluidNC first, then the pendant and the probe (its tip up: homed after the Stop)
         gone = {}
         while len(gone) < 3:
             s, h = held()
@@ -1767,11 +1768,12 @@ class EndToEnd(unittest.TestCase):
             got = iter((e["dir"], e["text"]) for e in self.state()["console"] if e["t"] >= since)
             return all(w in got for w in want)
         self.wait_for(lambda: said(since, ("info", RELEASED), ("info", "Released the pendant and the probe because no "
-                                                                       "FluidSender window is open"),
-                                   ("error", PROBE_LET_GO_DOWN)), 4, "the release's console lines")
+                                                                       "FluidSender window is open")),
+                      4, "the release's console lines")
+        self.assertFalse(said(since, ("error", PROBE_LET_GO_DOWN)))
         s = self.state()
         self.assertEqual({k: s["probe"][k] for k in ("port", "connected", "ready", "mayBeDown")},
-                         {"port": None, "connected": False, "ready": False, "mayBeDown": True})
+                         {"port": None, "connected": False, "ready": False, "mayBeDown": False})
 
         # no window open for longer than RELEASE: a probe connect is not cut short (then the probe is let go of)
         for _ in range(2):

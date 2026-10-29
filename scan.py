@@ -49,9 +49,12 @@ MOVE_MIN = 15.0         # s: a move to the next point may take this long at leas
 RAPID = 50.0            # ... or 3x its time at this speed (in/min; FluidNC's max rates if known) + 2 s
 FAR = 50.0              # in: the distance to assume when the start position isn't known
 OWNER = "scan"
-STOPPED = "Scan stopped. Home the probe before scanning again."
-STOPPED_DONE = ("Scan complete, data kept. The final probe retract / return move was stopped. "
-                "Home the probe before moving the machine.")
+# A Stop homes the probe by itself (H right after its abort): people forget, and its tip may still be down
+STOPPED = "Scan stopped."
+STOPPED_DONE = "Scan complete, data kept. The final probe retract / return move was stopped."
+STOP_HOMED = "Probe retracted (homed)."
+STOP_NOT_HOMED = "Probe did NOT confirm retract ({}). Home the probe before moving the machine."
+ABORT_WAIT = 2.0        # s: how long a stopped scan waits for Stop's probe abort to go out before it homes the probe
 NUM = re.compile(r"\s*[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?\s*")
 
 
@@ -238,6 +241,7 @@ class Scanner:
         self.running = False
         self.ending = False                 # the scan's work is over (only the bookkeeping is left)
         self.stopping = False               # stop() came for the scan starting or running
+        self.stop_aborted = threading.Event()   # stop() has sent its probe abort (the H after it must come later)
         self.phase = None                   # starting, moving, probing, homing, returning, stopping;
                                             # then done, stopped or failed
         self.settings = None                # the running or last scan's settings
@@ -328,6 +332,7 @@ class Scanner:
                 raise MachineError("A scan is already running", 409)
             self.starting = True
             self.stopping = False
+            self.stop_aborted.clear()
         try:
             ps = self.probe.state()
             if not ps["connected"]:
@@ -390,6 +395,7 @@ class Scanner:
             if self.running:
                 self.phase = "stopping"
         self.probe.abort()
+        self.stop_aborted.set()
         self.log("info", "Stopping the scan")
         self.changed()
         if stop_machine:
@@ -581,7 +587,7 @@ class Scanner:
                     self.changed()
             except Exception as e:
                 if self.stopped(e):
-                    return "stopped", STOPPED
+                    return "stopped", f"{STOPPED} {self.stop_home()}"
                 if isinstance(e, (ProbeOverTravel, _OverTravel)):
                     return "failed", self.over_travel(str(e))
                 return "failed", f"Scan failed: {_sentence(e)} {self.retract()}"
@@ -612,7 +618,7 @@ class Scanner:
                 self.move(*self.bit_at(xs[0], ys[0]))
             except Exception as e:
                 if self.stopped(e):
-                    return "stopped", STOPPED_DONE
+                    return "stopped", f"{STOPPED_DONE} {self.stop_home()}"
                 return "failed", ("Scan failed: the final probe retract / return did not finish (scan data was "
                                   f"kept): {_sentence(e)}")
             took = int(time.time() - self.started)
@@ -631,6 +637,25 @@ class Scanner:
         except MachineError as e:
             return (f"Over Travel Error: {_sentence(reason)} Probe did NOT confirm retract ({self.why(e)}). "
                     "Check the probe before moving the machine. Scan cancelled.")
+
+    def stop_home(self):
+        """After a Stop: home the probe (H) at once, since its abort left the tip wherever it was. Waits for Stop's
+        abort to go out first (stop() runs in another thread: an abort after the H would cut the H off), and tries
+        the H twice. Only the probe's own Z moves. Returns what to add to the message."""
+        with self.lock:
+            from_stop = self.stopping
+        if from_stop:
+            self.stop_aborted.wait(ABORT_WAIT)
+        why = None
+        for _ in range(2):
+            try:
+                self.probe.home(owner=OWNER)
+                return STOP_HOMED
+            except ProbeAborted as e:       # (an abort that came late: once more)
+                why = e
+            except Exception as e:          # not connected, no reply, error...
+                return STOP_NOT_HOMED.format(self.why(e))
+        return STOP_NOT_HOMED.format(self.why(why))
 
     def retract(self):
         """After any other failure: abort and home the probe (when possible). Returns what to add to the message."""

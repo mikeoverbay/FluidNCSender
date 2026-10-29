@@ -719,13 +719,13 @@ class Stops(ScanCase):
         self.scanner.thread.join(5)
         self.assertLess(time.monotonic() - t0, 1.0)
         st = self.assert_ended("stopped")
-        self.assertEqual(st["error"], "Scan stopped. Home the probe before scanning again.")
+        self.assertEqual(st["error"], "Scan stopped. Probe retracted (homed).")
         self.assertEqual(self.machine.calls.count(("stop",)), 1)
         self.assertEqual(len(self.machine.move_list()), 4)          # nothing moved after the stop
-        self.assertEqual(self.commands(), ["H"] + ["ZR:0.250", "P"] * 2 + ["A"])   # aborted, not homed
-        self.assertEqual((self.probe.state()["ready"], self.probe.state()["mayBeDown"]), (False, True))
+        self.assertEqual(self.commands(), ["H"] + ["ZR:0.250", "P"] * 2 + ["A", "H"])   # aborted, then homed
+        self.assertEqual((self.probe.state()["ready"], self.probe.state()["mayBeDown"]), (True, False))
         self.assertFalse(self.scanner.stop())                       # (nothing to stop any more)
-        self.assertIn(("info", "Scan stopped. Home the probe before scanning again."), self.logs)
+        self.assertIn(("info", "Scan stopped. Probe retracted (homed)."), self.logs)
 
     def test_stop_during_a_touch(self):
         self.probe.disconnect(force=True)
@@ -748,8 +748,9 @@ class Stops(ScanCase):
         self.assertLess(time.monotonic() - t0, 1.0)                 # not the 10 s of the touch
         self.assert_ended("stopped")
         received = self.received()
-        self.assertEqual([e["cmd"] for e in received if "cmd" in e][-3:], ["ZR:0.250", "P", "A"])
-        self.assertIn("abort", received[-1])
+        self.assertEqual([e["cmd"] for e in received if "cmd" in e][-4:], ["ZR:0.250", "P", "A", "H"])  # then homed
+        self.assertTrue(any("abort" in e for e in received))
+        self.assertEqual((self.probe.state()["ready"], self.probe.state()["mayBeDown"]), (True, False))
         self.assertEqual(self.machine.calls.count(("stop",)), 1)
         self.assertEqual(len(self.machine.move_list()), 2)
 
@@ -770,11 +771,11 @@ class Stops(ScanCase):
         self.scanner.thread.join(5)
         st = self.assert_ended("stopped")
         self.assertEqual(st["error"], "Scan complete, data kept. The final probe retract / return move was stopped. "
-                                      "Home the probe before moving the machine.")
+                                      "Probe retracted (homed).")
         self.assertTrue(st["result"]["complete"])
         self.assertEqual(st["savedTo"], os.path.join(self.scans, "last-scan.xyz"))
         self.assertEqual(self.machine.move_list()[-1], (2.0, 1.0))      # no return move
-        self.assertEqual((self.probe.state()["ready"], self.probe.state()["mayBeDown"]), (False, True))
+        self.assertEqual((self.probe.state()["ready"], self.probe.state()["mayBeDown"]), (True, False))
 
     def test_stop_while_starting(self):
         """A stop that comes before the scan thread runs: nothing moves."""
@@ -787,9 +788,9 @@ class Stops(ScanCase):
         self.scanner.start(SMALL)
         self.scanner.thread.join(5)
         st = self.assert_ended("stopped")
-        self.assertEqual(st["error"], "Scan stopped. Home the probe before scanning again.")
+        self.assertEqual(st["error"], "Scan stopped. Probe retracted (homed).")
         self.assertEqual(self.machine.move_list(), [])
-        self.assertEqual(self.commands(), ["H", "A"])
+        self.assertEqual(self.commands(), ["H", "A", "H"])
 
     def test_machine_stop_calls_back(self):
         """machine.stop() may call scanner.stop() itself (POST /api/machine/stop during a scan): no loop."""
@@ -827,7 +828,7 @@ class Stops(ScanCase):
 
     def test_machine_stop_first(self):
         """machine.py's Stop sets activity_stop and wakes scan_move before it calls scanner.stop(): the move
-        fails first. That is still a stop: no retract, the probe must be homed again."""
+        fails first. That is still a stop: the probe is aborted, then homed."""
         self.machine.hold_move = 3
         real = self.machine.stop
 
@@ -841,9 +842,9 @@ class Stops(ScanCase):
         self.wait_for(lambda: self.machine.moves == 3 and self.machine.moving.is_set())
         self.machine.stop()
         st = self.assert_ended("stopped")
-        self.assertEqual(st["error"], "Scan stopped. Home the probe before scanning again.")
-        self.assertEqual(self.commands(), ["H", "ZR:0.250", "P", "A"])     # (point 1 only) aborted, not homed
-        self.assertFalse(self.probe.state()["ready"])
+        self.assertEqual(st["error"], "Scan stopped. Probe retracted (homed).")
+        self.assertEqual(self.commands(), ["H", "ZR:0.250", "P", "A", "H"])     # (point 1 only) aborted, then homed
+        self.assertTrue(self.probe.state()["ready"])
 
     def test_stop_when_nothing_runs(self):
         self.assertFalse(self.scanner.stop())
