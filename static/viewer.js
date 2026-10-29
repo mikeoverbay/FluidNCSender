@@ -423,6 +423,50 @@ export class Viewer {
     this.tool.scale.setScalar(Math.max(1e-6, this.camera.position.distanceTo(this.tool.position) * TOOL_SIZE));
   }
 
+  // ---------------------------------------------------------------- machine travel
+
+  /** The machine's travel in work coordinates (inches): { min: [x, y, z], max: [x, y, z], zero: [x, y] } (zero: the
+   *  X and Y of the machine's 0 sides, where the walls go), or null to hide it. Drawn as very transparent black
+   *  rectangles: the floor (the bottom of Z's travel) and the two walls on the machine's 0 sides. */
+  setTravel(box) {
+    const key = box ? JSON.stringify([box.min, box.max, box.zero].map(v => v.map(n => +n.toFixed(4)))) : '';
+    if (key === this.travelKey) return;
+    this.travelKey = key;
+    this.travelBox = box;
+    this.buildTravel();
+    this.render();
+  }
+
+  buildTravel() {
+    if (this.travel) {
+      this.scene.remove(this.travel);
+      this.travel.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
+      this.travel = null;
+    }
+    const box = this.travelBox;
+    if (!box) return;
+    const s = this.world.scale.z;                  // (in the scene, like the tool: the Z stretch moves it, no more)
+    const [x0, y0, z0] = box.min, [x1, y1, z1] = box.max, [xw, yw] = box.zero;
+    const lo = z0 * s, hi = z1 * s;
+    const fill = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.1, side: THREE.DoubleSide,
+      depthWrite: false });
+    const edge = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 });
+    const group = new THREE.Group();
+    for (const corners of [
+      [[x0, y0, lo], [x1, y0, lo], [x1, y1, lo], [x0, y1, lo]],        // the floor
+      [[xw, y0, lo], [xw, y1, lo], [xw, y1, hi], [xw, y0, hi]],        // the wall on X's 0 side
+      [[x0, yw, lo], [x1, yw, lo], [x1, yw, hi], [x0, yw, hi]],        // the wall on Y's 0 side
+    ]) {
+      const pts = corners.map(p => new THREE.Vector3(...p));
+      const geo = new THREE.BufferGeometry().setFromPoints([pts[0], pts[1], pts[2], pts[0], pts[2], pts[3]]);
+      group.add(new THREE.Mesh(geo, fill));
+      group.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), edge));
+    }
+    group.renderOrder = -1;                        // (under the toolpath and the scan)
+    this.travel = group;
+    this.scene.add(group);
+  }
+
   // ---------------------------------------------------------------- data and options
 
   setJob(job, fit = true) {
@@ -500,7 +544,7 @@ export class Viewer {
     if (key === 'rapids' && this.layers.rapid) this.layers.rapid.visible = value;
     if (key === 'scan' && this.layers.surface) this.layers.surface.visible = value;
     if (key === 'leveled') { this.buildJob(); this.highlight(this.line, this.lastLine); }
-    if (key === 'zscale') this.world.scale.z = value;
+    if (key === 'zscale') { this.world.scale.z = value; this.buildTravel(); }
     this.syncBar();
     this.render();
   }

@@ -808,19 +808,35 @@ class Stage2(Harness):
 
 
 class Settings(Stage2):
+    def test_travel_as_fluidnc_works_it_out(self):
+        """The machine's envelope (machine coordinates, inches): homing toward + (the default) puts the travel below
+        mpos_mm, toward - above it; no homing section: below 0; no max_travel_mm: unknown."""
+        self.assertEqual(machine.travel({"maxTravel": 254.0, "homeMpos": 0.0, "homePositive": True}), [-10.0, 0.0])
+        self.assertEqual(machine.travel({"maxTravel": 254.0, "homeMpos": 25.4, "homePositive": False}), [1.0, 11.0])
+        self.assertEqual(machine.travel({"maxTravel": 254.0, "homeMpos": None, "homePositive": None}), [-10.0, 0.0])
+        self.assertIsNone(machine.travel({"maxTravel": None, "homeMpos": 0.0, "homePositive": True}))
+        self.go_live(settings=dict(SETTINGS, **{"$/axes/x/max_travel_mm": "762.000", "$/axes/x/homing/mpos_mm": "0.000",
+                                                "$/axes/x/homing/positive_direction": "false",
+                                                "$/axes/y/max_travel_mm": "609.600", "$/axes/y/homing/mpos_mm": "-5.000",
+                                                "$/axes/y/homing/positive_direction": "true"}))
+        axes = self.m.snapshot()["axes"]
+        self.assertEqual((axes["x"]["travel"], axes["y"]["travel"], axes["z"]["travel"]),
+                         ([0.0, 30.0], [-24.1969, -0.1969], None))
+
     def test_read_quietly_after_g(self):
         self.go_live()
-        self.assertEqual(self.link.axes, {"x": {"maxRate": 5000.0, "accel": 200.0, "softLimits": True},
-                                          "y": {"maxRate": 5000.0, "accel": 200.0, "softLimits": True},
-                                          "z": {"maxRate": 2000.0, "accel": 100.0, "softLimits": True}})
+        no_travel = {"maxTravel": None, "homeMpos": None, "homePositive": None}     # (not in SETTINGS here)
+        self.assertEqual(self.link.axes, {"x": {"maxRate": 5000.0, "accel": 200.0, "softLimits": True, **no_travel},
+                                          "y": {"maxRate": 5000.0, "accel": 200.0, "softLimits": True, **no_travel},
+                                          "z": {"maxRate": 2000.0, "accel": 100.0, "softLimits": True, **no_travel}})
         self.assertEqual(self.link.planner_blocks, 16)
         self.assertEqual(self.log("tx"), ["$I", "$G"])          # the reads, their values and oks are not shown
         self.assertEqual(self.log("rx"), ["[VER:3.7 FluidNC v3.9.4:]", "[OPT:PHS]", "ok",
                                           "[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]", "ok"])
         self.assertEqual(self.log("info")[-1], "FluidNC max speeds: X 196.9 · Y 196.9 · Z 78.7 in/min")
-        axes = {"x": {"maxRate": 196.85, "accel": 7.874, "softLimits": True},
-                "y": {"maxRate": 196.85, "accel": 7.874, "softLimits": True},
-                "z": {"maxRate": 78.74, "accel": 3.937, "softLimits": True}}
+        axes = {"x": {"maxRate": 196.85, "accel": 7.874, "softLimits": True, "travel": None},
+                "y": {"maxRate": 196.85, "accel": 7.874, "softLimits": True, "travel": None},
+                "z": {"maxRate": 78.74, "accel": 3.937, "softLimits": True, "travel": None}}
         self.assertEqual(self.evs("axes"), [{"type": "axes", "axes": axes, "plannerBlocks": 16}])
         snap = self.m.snapshot()
         self.assertEqual((snap["axes"], snap["jog"], snap["zeroUndo"], snap["alarm"]), (axes, None, None, None))
@@ -837,7 +853,7 @@ class Settings(Stage2):
         self.assertEqual(self.log("info")[-1], "FluidNC max speeds: X 196.9 · Y 196.9 in/min (Z: could not be read)")
         ev = self.evs("axes")[-1]
         self.assertEqual((ev["axes"]["z"], ev["axes"]["x"]["accel"], ev["plannerBlocks"]),
-                         ({"maxRate": None, "accel": 3.937, "softLimits": True}, None, None))
+                         ({"maxRate": None, "accel": 3.937, "softLimits": True, "travel": None}, None, None))
 
     def test_soft_limits_off_are_said(self):
         self.go_live(settings=dict(SETTINGS, **{"$/axes/x/soft_limits": "false", "$/axes/z/soft_limits": "false"}))
@@ -1151,7 +1167,7 @@ class HoldJogs(Stage2):
         self.assertEqual([e["type"] for e in self.events[-4:]], ["console", "console", "axes", "conn"])
         self.assertEqual(self.evs("jog")[-1], {"type": "jog", "jog": None})
         self.assertEqual(self.log("info")[-2:], ["Disconnected from /dev/fake", "Jog stopped (disconnected): moved 0 in"])
-        self.assertEqual(self.m.snapshot()["axes"], {a: {"maxRate": None, "accel": None, "softLimits": None} for a in "xyz"})
+        self.assertEqual(self.m.snapshot()["axes"], {a: {"maxRate": None, "accel": None, "softLimits": None, "travel": None} for a in "xyz"})
 
     def test_feed_hold_stops_it_too(self):
         self.ready()
@@ -1686,7 +1702,7 @@ class Alarms(Stage2):
     def test_snapshot_when_not_connected(self):
         snap = self.m.snapshot()
         self.assertEqual((snap["connected"], snap["axes"], snap["jog"], snap["zeroUndo"], snap["alarm"]),
-                         (False, {a: {"maxRate": None, "accel": None, "softLimits": None} for a in "xyz"}, None, None, None))
+                         (False, {a: {"maxRate": None, "accel": None, "softLimits": None, "travel": None} for a in "xyz"}, None, None, None))
 
 
 BANNER = "Grbl 3.7 [FluidNC v3.9.4 (noradio) '$' for help]"

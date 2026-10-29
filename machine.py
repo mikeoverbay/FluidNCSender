@@ -10,7 +10,8 @@ The only bytes FluidSender sends on its own: one ^L (0x0C) when it connects, bef
 200 ms (status; every 100 ms while a hold jog runs or a jog is being stopped, every 15 ms for a moment
 after the vacuum or AUX switched or an override changed); $I, $G ($T too when it is in an alarm), the
 settings it reads (never sets) when it connects: $/axes/<x|y|z>/max_rate_mm_per_min,
-acceleration_mm_per_sec2 and soft_limits, $/planner_blocks, $/coolant/flood_pin, mist_pin and delay_ms,
+acceleration_mm_per_sec2, soft_limits, max_travel_mm, homing/mpos_mm and homing/positive_direction,
+$/planner_blocks, $/coolant/flood_pin, mist_pin and delay_ms,
 and $SS (its startup log: the spindle type); a quiet $G after a vacuum/AUX toggle or at a job's end when
 FluidNC's reports can't show those outputs (see Link.got_coolant_setting); G20 after connecting or after a
 controller reset, once FluidNC is Idle; jog cancels
@@ -223,9 +224,14 @@ AXES = "xyz"
 # hold-jog pieces need the numbers too. With soft_limits false (FluidNC's default) FluidNC doesn't keep jogs
 # inside the travel, which the Jog panel then says. The coolant pins tell how the vacuum and AUX switches can
 # know their state (see Link.got_setting), and delay_ms what switching one on in a job does (see R5 in the page)
+# The travel (max_travel_mm, homing/mpos_mm and homing/positive_direction) gives the machine's envelope, which
+# the visualizer draws (see Link.travel)
+# (optional: an axis with no homing section answers error:3, which is not shown; FluidNC then uses mpos 0, toward +)
+TRAVEL_READS = tuple(f"$/axes/{a}/{k}" for a in AXES for k in ("max_travel_mm", "homing/mpos_mm",
+                                                                "homing/positive_direction"))
 SETTINGS = (tuple(f"$/axes/{a}/max_rate_mm_per_min" for a in AXES)
             + tuple(f"$/axes/{a}/acceleration_mm_per_sec2" for a in AXES) + ("$/planner_blocks",)
-            + tuple(f"$/axes/{a}/soft_limits" for a in AXES)
+            + tuple(f"$/axes/{a}/soft_limits" for a in AXES) + TRAVEL_READS
             + ("$/coolant/flood_pin", "$/coolant/mist_pin", "$/coolant/delay_ms"))
 SPINDLE_READ = "$SS"    # last of the reads: FluidNC's startup log, whose spindle line names the type (quiet)
 READS = SETTINGS + (SPINDLE_READ,)
@@ -717,7 +723,25 @@ def wcs_name(wcs):
 
 
 def _no_axes():
-    return {a: {"maxRate": None, "accel": None, "softLimits": None} for a in AXES}
+    return {a: {"maxRate": None, "accel": None, "softLimits": None, "maxTravel": None, "homeMpos": None,
+                "homePositive": None} for a in AXES}
+
+
+def _no_axes_info():
+    """The axes as the page gets them (axes_info) when nothing is known."""
+    return {a: {"maxRate": None, "accel": None, "softLimits": None, "travel": None} for a in AXES}
+
+
+def travel(axis):
+    """An axis's travel in machine coordinates, [min, max] in inches, as FluidNC works it out
+    (limitsMinPosition / limitsMaxPosition): homing toward + (the default, or no homing section) puts the
+    travel below mpos_mm, toward - above it; None until max_travel_mm is known."""
+    t = axis.get("maxTravel")
+    if t is None:
+        return None
+    m = axis.get("homeMpos") or 0.0
+    lo, hi = (m - t, m) if axis.get("homePositive") is not False else (m, m + t)
+    return [round(lo / MM, 4), round(hi / MM, 4)]
 
 
 def _per_inch(v):
@@ -1556,7 +1580,8 @@ class Link:
         startup = (quiet and line.text == SPINDLE_READ and text.startswith("[MSG:")
                    and not (msg_ends(text, "Reset to continue") or msg_ends(text, "Reboot FluidNC")))
         modes = quiet and line.auto == "coolant" and text.startswith("[GC:")
-        if not (quiet and (setting or text == "ok" or startup or modes)):
+        optional = quiet and reply and line.text in TRAVEL_READS     # (its error too: no homing section, say)
+        if not (quiet and (setting or text == "ok" or startup or modes or optional)):
             if quiet and reply:
                 m.log("tx", line.text)      # but an error is, with the line it answers
             m.log("rx", shown or text)
@@ -2476,6 +2501,19 @@ class Link:
             if flag is not None:
                 self.axes[parts[1]]["softLimits"] = flag
             return
+        if len(parts) == 4 and parts[0] == "axes" and parts[1] in self.axes and parts[2] == "homing":
+            if parts[3] == "positive_direction":
+                flag = {"true": True, "false": False}.get(value.strip().lower())
+                if flag is not None:
+                    self.axes[parts[1]]["homePositive"] = flag
+            elif parts[3] == "mpos_mm":         # (any finite number: 0 and below too)
+                try:
+                    v = float(value)
+                except ValueError:
+                    return
+                if math.isfinite(v):
+                    self.axes[parts[1]]["homeMpos"] = v
+            return
         try:
             v = float(value)
         except ValueError:
@@ -2485,7 +2523,8 @@ class Link:
         if parts == ["planner_blocks"]:
             self.planner_blocks = int(v)
         elif len(parts) == 3 and parts[0] == "axes" and parts[1] in self.axes:
-            key = {"max_rate_mm_per_min": "maxRate", "acceleration_mm_per_sec2": "accel"}.get(parts[2])
+            key = {"max_rate_mm_per_min": "maxRate", "acceleration_mm_per_sec2": "accel",
+                   "max_travel_mm": "maxTravel"}.get(parts[2])
             if key:
                 self.axes[parts[1]][key] = v
 
@@ -2589,8 +2628,8 @@ class Link:
     def axes_info(self):
         """The axes for the page: max rates in in/min, accelerations in in/s^2, soft limits on or off; None if
         they couldn't be read."""
-        return {a: {"maxRate": _per_inch(v["maxRate"]), "accel": _per_inch(v["accel"]), "softLimits": v["softLimits"]}
-                for a, v in self.axes.items()}
+        return {a: {"maxRate": _per_inch(v["maxRate"]), "accel": _per_inch(v["accel"]), "softLimits": v["softLimits"],
+                    "travel": travel(v)} for a, v in self.axes.items()}
 
     def settings_done(self):
         rates = [(a.upper(), v["maxRate"]) for a, v in self.axes.items()]
@@ -2924,7 +2963,7 @@ class Machine:
                 "firmware": link.firmware if link else None,
                 "status": link.current_status(now) if link else None,
                 "modal": link.modal if link else None,
-                "axes": link.axes_info() if link else _no_axes(),
+                "axes": link.axes_info() if link else _no_axes_info(),
                 "jog": link.hold.info() if link and link.hold else None,
                 "zeroUndo": self.zero_info(),
                 "alarm": link.alarm if link else None,
@@ -3853,7 +3892,7 @@ class Machine:
             if link.connected and message:
                 link.set_alarm(None)            # (Undo Zero's records stay: FluidNC keeps the offsets)
                 if link.axes != _no_axes() or link.planner_blocks:
-                    self.emit({"type": "axes", "axes": _no_axes(), "plannerBlocks": None})
+                    self.emit({"type": "axes", "axes": _no_axes_info(), "plannerBlocks": None})
                 self.emit({"type": "conn", "connected": False, "port": None, "firmware": None, "message": message})
 
     def shutdown(self):

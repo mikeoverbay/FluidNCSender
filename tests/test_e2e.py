@@ -43,11 +43,12 @@ SETTINGS = ["$/axes/x/max_rate_mm_per_min", "$/axes/y/max_rate_mm_per_min", "$/a
             "$/axes/x/acceleration_mm_per_sec2", "$/axes/y/acceleration_mm_per_sec2",
             "$/axes/z/acceleration_mm_per_sec2", "$/planner_blocks",
             "$/axes/x/soft_limits", "$/axes/y/soft_limits", "$/axes/z/soft_limits",
+            *(f"$/axes/{a}/{k}" for a in "xyz" for k in ("max_travel_mm", "homing/mpos_mm", "homing/positive_direction")),
             "$/coolant/flood_pin", "$/coolant/mist_pin", "$/coolant/delay_ms"]
 READS = [*SETTINGS, "$SS"]
 FW411 = "4.1 FluidNC v4.1.1 (esp32-noradio)"    # the simulator's default, as the user's machine
 FW394 = "3.7 FluidNC v3.9.4"                    # (--fw 3.9.4)
-NO_AXES = {a: {"maxRate": None, "accel": None, "softLimits": None} for a in "xyz"}
+NO_AXES = {a: {"maxRate": None, "accel": None, "softLimits": None, "travel": None} for a in "xyz"}
 JOGGING = "Jogging: let go of the jog button first"
 CRITICAL = "FluidNC needs a Soft Reset first ([MSG:Reset to continue])"
 JOB_RUNNING = "A job is running"
@@ -821,9 +822,9 @@ class EndToEnd(unittest.TestCase):
         log0 = len(sim.entries())
         i = self.connect(ev, sim, inches=True)
         ax, _ = ev.wait(lambda e: e["type"] == "axes", since=i, what="axes event")
-        want = {"x": {"maxRate": 196.85, "accel": 7.874, "softLimits": True},       # 5000 / 2000 mm/min,
-                "y": {"maxRate": 196.85, "accel": 7.874, "softLimits": True},       # 200 / 100 mm/s^2,
-                "z": {"maxRate": 78.74, "accel": 3.937, "softLimits": True}}        # --soft-limits
+        want = {"x": {"maxRate": 196.85, "accel": 7.874, "softLimits": True, "travel": [-31.4961, 0.0]},       # 5000 / 2000 mm/min,
+                "y": {"maxRate": 196.85, "accel": 7.874, "softLimits": True, "travel": [-23.622, 0.0]},       # 200 / 100 mm/s^2,
+                "z": {"maxRate": 78.74, "accel": 3.937, "softLimits": True, "travel": [-3.937, 0.0]}}        # --soft-limits
         self.assertEqual(ax, {"type": "axes", "axes": want, "plannerBlocks": 16})
         ev.wait(console("info", "FluidNC max speeds: X 196.9 · Y 196.9 · Z 78.7 in/min"), since=i)
         self.wait_for(lambda: "G20" in sim.lines(log0), 3, "G20 at FluidNC")    # (the sim logs it a bit later)
@@ -854,6 +855,9 @@ class EndToEnd(unittest.TestCase):
                         "(FluidNC still caps them)"), since=i)
         shown = [(e["dir"], e["text"]) for e in ev.find(lambda e: e["type"] == "console", since=i)]
         for q in SETTINGS:
+            if "max_travel_mm" in q or "/homing/" in q:      # (optional: their errors are not shown)
+                self.assertNotIn(("tx", q), shown)
+                continue
             n = shown.index(("tx", q))
             self.assertEqual(shown[n + 1], ("rx", "error:3"), q)
         self.to_work_zero(ev, 3e-5)

@@ -889,6 +889,19 @@ const mach = {
 const live = () => mach.link === 'up' && mach.connected;
 const NOT_LIVE = { status: null, modal: null, axes: null, jog: null, zeroUndo: null, alarm: null };
 
+/** The machine's travel (FluidNC's max_travel and homing, machine coordinates) in work coordinates for the
+ *  visualizer, moved by the work offset now (machine position - work position); the walls go on each axis's side
+ *  nearest machine 0. null while not connected or not known. */
+function travelBox() {
+  const st = live() && mach.status, ax = mach.axes;
+  const t = ['x', 'y', 'z'].map(a => ax?.[a]?.travel);
+  if (!st || !Array.isArray(st.mpos) || !Array.isArray(st.wpos) || !t.every(r => Array.isArray(r))) return null;
+  const wco = st.mpos.map((m, i) => m - st.wpos[i]);
+  if (!wco.every(Number.isFinite)) return null;
+  const zero = [0, 1].map(i => (Math.abs(t[i][0]) <= Math.abs(t[i][1]) ? t[i][0] : t[i][1]) - wco[i]);
+  return { min: t.map((r, i) => r[0] - wco[i]), max: t.map((r, i) => r[1] - wco[i]), zero };
+}
+
 function machineChanged() {
   viewer.setPreLeveled(mach.program?.preLeveled);
   machinePanel.update(mach);
@@ -898,6 +911,7 @@ function machineChanged() {
   konsole.setEnabled(live(), running ? 'A job is running: typed lines are refused until it ends (? ! ~ on their own go at once)' : '');
   const w = live() && mach.status?.wpos;
   if (w) viewer.setTool(w[0], w[1], w[2]); else viewer.setTool(null);
+  viewer.setTravel(travelBox());
   const fw = firmwareName(mach.firmware);
   $('sconn').textContent = live() ? `Connected: ${mach.port}${fw ? ' · ' + fw : ''}` : 'Not connected';
   $('sconn').classList.toggle('on', live());

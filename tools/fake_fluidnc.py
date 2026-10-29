@@ -134,7 +134,7 @@ $X in a plain alarm marks every axis homed and prints "[MSG:INFO: Caution: Unloc
 Supported: ? ! ~ Ctrl-X 0x85 0xA0 0xA1 0x90-0x9E (0xB4), $I $G $T $SS $X $H $HX/$HY/$HZ $J=
 (3.9.4 answers $I, $T and $SS only once the planner is empty; 4.1.1 at once),
 $/axes/<x|y|z>/max_rate_mm_per_min, $/axes/<x|y|z>/acceleration_mm_per_sec2,
-$/axes/<x|y|z>/soft_limits, $/planner_blocks, $/coolant/flood_pin, $/coolant/mist_pin,
+$/axes/<x|y|z>/soft_limits, max_travel_mm, homing/mpos_mm and homing/positive_direction, $/planner_blocks, $/coolant/flood_pin, $/coolant/mist_pin,
 $/coolant/delay_ms (read only; other $/... answer error:3),
 G0 G1 G4 G10 L2/L20 (P0 or P1) G17 G20 G21 G28 G28.1 G43.1 G49 G53 G54 G90 G91 G92 G92.1 G94,
 M0 M1 M2 M30 M3 M4 M5 M7 M7.1 M8 M8.1 M9, F S T N. Any other G or M code (and any other letter)
@@ -202,6 +202,9 @@ SETTINGS = {          # the config items FluidSender reads ($/name), as this mac
     "axes/z/max_rate_mm_per_min": 2000.0,
     "axes/x/acceleration_mm_per_sec2": 200.0, "axes/y/acceleration_mm_per_sec2": 200.0,
     "axes/z/acceleration_mm_per_sec2": 100.0,
+    # the travel --soft-limits keeps (machine X -800..0, Y -600..0, Z -100..0 mm): homed toward + at 0
+    "axes/x/max_travel_mm": 800.0, "axes/y/max_travel_mm": 600.0, "axes/z/max_travel_mm": 100.0,
+    "axes/x/homing/mpos_mm": 0.0, "axes/y/homing/mpos_mm": 0.0, "axes/z/homing/mpos_mm": 0.0,
     "planner_blocks": 16,
 }
 # the coolant pins: I2SO ones FluidNC reads back (its A: shows them); --no-readback: plain ESP32 GPIOs, set up as
@@ -693,6 +696,8 @@ class FakeFluidNC:
         key = text[2:].strip()
         if self.settings and key.lower() in (f"axes/{a}/soft_limits" for a in "xyz"):
             return [f"$/{key}={'true' if self.soft_limits else 'false'}", "ok"]     # (FluidNC prints bools so)
+        if self.settings and key.lower() in (f"axes/{a}/homing/positive_direction" for a in "xyz"):
+            return [f"$/{key}=true", "ok"]
         if self.settings and key.lower() in ("coolant/flood_pin", "coolant/mist_pin"):
             return [f"$/{key}={self.pin(key.lower()[8:-4])}", "ok"]
         if self.settings and key.lower() == "coolant/delay_ms":
