@@ -37,12 +37,21 @@ example next to the job. Open a saved scan with **File → Open…** (any `.xyz`
 ## Apply the scan (level)
 
 1. Open the job's **original** G-code (not a saved leveled one, see below).
-2. In the Scan panel, under **Apply to G-code**, pick the scan (the last one, or a `.xyz` file).
-3. **Z surface** (in) is the Z of the G-code's surface, usually 0.
+2. **Z surface** (in) is the Z of the G-code's surface, usually 0.
    **Arc segment** (mm) is the length G2/G3 arcs are cut into, 0.1 by default, so arcs follow the surface too.
-4. Click the **Apply** box (or **Tools → Auto-level…** to get to it). While the G-code is leveled the box reads
-   **Apply: ON** and **blinks bright red**. Click it again to go back to the original G-code.
-5. **Save leveled G-code…** writes the leveled file (default `<name>-autoleveled.gcode`). Or just **Run**: while
+3. Under **Apply to G-code** (or **Tools → Auto-level…** to get there) there are two boxes, and **only one can be
+   on**:
+   - **Apply last scan**: levels with the scan just made here.
+   - **Apply file…**: opens the file dialog; the `.xyz` you pick levels the G-code at once.
+
+   The one that is on **blinks bright red and names its scan** (*Last scan (30 × 30): ON* or
+   *File scan.xyz: ON*). Click it again to go back to the original G-code. Click the other box to level with that
+   scan instead. If more than a quarter of the G-code is outside the scan, a red **⚠ WRONG SCAN?** line says so,
+   and Run's question does too.
+
+   To only **look** at a scan, open it with **File → Open…** (or click it in the Files panel): that draws it in
+   the visualizer (the **Scan** checkbox) and levels nothing.
+4. **Save leveled G-code…** writes the leveled file (default `<name>-autoleveled.gcode`). Or just **Run**: while
    Apply is on, the leveled version is what gets sent, and Run's question says **LEVELED**.
 
 Leveled Z = G-code Z + scan height − Z surface: where the scan reads higher, the cut is raised by that much.
@@ -59,7 +68,7 @@ The result matches UGS's auto-leveler byte for byte.
 When you open a file with that line, or one whose name ends in `-autoleveled` (UGS's and FluidSender's default
 name), FluidSender treats it as **already leveled**:
 
-- the **Apply** box is greyed (its tooltip says why), and the server refuses to level it;
+- both **Apply** boxes are greyed (their tooltips say why), and the server refuses to level it;
 - Run's question says **ALREADY LEVELED: … It runs as it is**;
 - the visualizer's **Leveled** checkbox stays off (it would draw the heights twice).
 

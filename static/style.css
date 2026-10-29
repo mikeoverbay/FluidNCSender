@@ -563,6 +563,7 @@ button.go:hover { background: var(--go-hover); }
 .lgrid { display: grid; grid-template-columns: auto minmax(36px, 1fr) auto; gap: 3px 5px; align-items: center; }
 .lgrid input[type=text] { width: 100%; }
 .lbtns { display: flex; gap: 4px; }
+.lbtns.lsrcs { flex-direction: column; }
 .lbtns button { flex: 1 1 auto; min-width: 0; padding: 2px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Apply: a tick box; ON blinks bright red (the G-code that runs is the leveled one) */
 .lapply { display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600; }
