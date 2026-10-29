@@ -72,11 +72,16 @@ start corner for you and shifts every point back to the spindle centerline:
 
 1. Zero X, Y and Z with the bit as usual (zero Z on the surface at the scan's first point, Min X / Min Y,
    for the most exact depth: the scan's heights are relative to that first touch).
-2. In the Probe section set **Offset from spindle X 0, Y −3** (once: it is remembered).
+2. In the Probe section set **Offset from spindle X 0, Y 3** (once: it is remembered). It is how far the spindle is from the probe: the probe touches at the bit's position minus it.
 3. Set **Min / Max X and Y to the job's own area**, where the bit will cut (for example X 1–8, Y 1–11.5).
 4. **Start Scan**. The bit goes to Y + 3 (here Y 4–14.5) so the probe lands on that area. The saved scan is
    in the job's coordinates, ready to level.
 5. **Apply**, then **Run**. Don't re-zero X, Y or Z between the scan and the end of the job.
+
+**First run:** FluidSender starts with Min / Max X and Y all **0** and the offset at **0, 0**, so nothing
+made up can send the machine somewhere. **Start Scan is refused** while the area is all 0 ("Set the scan area
+first"). With the offset at 0, 0 the panel shows an amber note, and Start Scan's question opens with a
+**WARNING** you must OK: 0, 0 is right only if the probe is on the spindle centerline.
 
 **Why:** a leveled G-code has the scan's heights built in at fixed X/Y spots. Re-zero X or Y after leveling and
 the heights land in the wrong places: the cut has high and low spots that aren't on the stock. If you must

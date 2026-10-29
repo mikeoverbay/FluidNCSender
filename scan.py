@@ -33,15 +33,18 @@ from machine import SAFE_Z, MachineError, fixed
 from probe import NO_HOME_REPLY, ProbeAborted, ProbeError, ProbeOverTravel, java_fixed
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULTS = {"minX": 0.5, "minY": 1.0, "maxX": 8.5, "maxY": 12.0, "xPoints": 15, "yPoints": 5, "zRetract": 0.2,
+# A first run starts with no area (Min / Max all 0: Start Scan refuses it until they are set) and no probe offset
+# (0, 0 warns at Start): nothing made up that could send the machine somewhere it shouldn't go.
+DEFAULTS = {"minX": 0.0, "minY": 0.0, "maxX": 0.0, "maxY": 0.0, "xPoints": 15, "yPoints": 5, "zRetract": 0.2,
             "probeOffX": 0.0, "probeOffY": 0.0}
+UNSET = "Scan area not set: Min / Max X and Y are all 0. Set them (or Use G-code area) first."
 LABELS = {"minX": "Min X", "minY": "Min Y", "maxX": "Max X", "maxY": "Max Y", "xPoints": "Points X",
           "yPoints": "Points Y", "zRetract": "Z retract", "probeOffX": "Probe offset X", "probeOffY": "Probe offset Y"}
 MAX_AXIS_POINTS = 100
 MAX_POINTS = 2000
 ZR_MIN, ZR_MAX = 0.01, 2.0
 MAX_COORD = 100.0       # in: no work position further out than this is meant
-MAX_OFFSET = 12.0       # in: the probe's offset from the bit, at most this (the user's is Y -3: 3 in toward -Y)
+MAX_OFFSET = 12.0       # in: the spindle's offset from the probe, at most this (the user's: Y 3, probe 3 in toward -Y)
 MOVE_MIN = 15.0         # s: a move to the next point may take this long at least (UGS) ...
 RAPID = 50.0            # ... or 3x its time at this speed (in/min; FluidNC's max rates if known) + 2 s
 FAR = 50.0              # in: the distance to assume when the start position isn't known
@@ -60,6 +63,11 @@ def _number(v, key):
     if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
         raise MachineError(f"{LABELS[key]} must be a number")
     return float(v)
+
+
+def area_unset(s):
+    """True while Min / Max X and Y are all 0 (a first run): no area to scan yet."""
+    return all(s[k] == 0 for k in ("minX", "maxX", "minY", "maxY"))
 
 
 def check_settings(data=None, base=None):
@@ -85,7 +93,7 @@ def check_settings(data=None, base=None):
         if not v.is_integer() or not 1 <= v <= MAX_AXIS_POINTS:
             raise MachineError(f"Points {axis} must be a whole number from 1 to {MAX_AXIS_POINTS}")
         out[key] = int(v)
-    for axis in "XY":
+    for axis in "XY" if not area_unset(out) else "":          # (all 0: not set yet, kept as it is)
         lo, hi, n = out["min" + axis], out["max" + axis], out[axis.lower() + "Points"]
         if lo > hi:
             raise MachineError(f"Min {axis} ({lo:g}) is more than Max {axis} ({hi:g})")
@@ -313,6 +321,8 @@ class Scanner:
         bad, a scan runs, the probe isn't connected, busy or homed, the machine refuses the scan, or the bit is
         lower than SAFE_Z above the work zero (see clearance)."""
         settings = check_settings(settings, self.saved_settings())
+        if area_unset(settings):
+            raise MachineError(UNSET)
         with self.lock:
             if self.running or self.starting:
                 raise MachineError("A scan is already running", 409)
@@ -518,10 +528,11 @@ class Scanner:
         return r / 100.0 if _real(r) and 0 < r <= 100 else 1.0
 
     def bit_at(self, x, y):
-        """Where the bit goes so the probe lands on grid point (x, y): the probe sits (probeOffX, probeOffY) from the
-        bit, so the grid and the saved file are where the probe touches, in the job's own coordinates."""
+        """Where the bit goes so the probe lands on grid point (x, y). The offset is the spindle's distance from the
+        probe (the user's: Y 3): the probe touches at the bit's position minus it, so the bit goes to the point plus
+        it. The grid and the saved file stay where the probe touches: the probe data is shifted, never the G-code."""
         s = self.settings
-        return x - s.get("probeOffX", 0.0), y - s.get("probeOffY", 0.0)
+        return x + s.get("probeOffX", 0.0), y + s.get("probeOffY", 0.0)
 
     def move(self, x, y):
         """machine.scan_move to (x, y), with UGS's timeout: 3x the expected time + 2 s, 15 s at least. The time counts
@@ -541,8 +552,8 @@ class Scanner:
         self.rate, self.pos = self.where()
         self.log("info", f"Scan: {s['xPoints']} x {s['yPoints']} = {total} points, X {s['minX']:.4f} to "
                          f"{s['maxX']:.4f}, Y {s['minY']:.4f} to {s['maxY']:.4f} in, Z retract {s['zRetract']:.3f} in"
-                         + (f", probe offset X {s['probeOffX']:+.4f} Y {s['probeOffY']:+.4f} in (the bit goes the "
-                            "opposite way)" if s.get("probeOffX") or s.get("probeOffY") else ""))
+                         + (f", offset from spindle X {s['probeOffX']:+.4f} Y {s['probeOffY']:+.4f} in (the bit goes to "
+                            "each point plus it)" if s.get("probeOffX") or s.get("probeOffY") else ""))
         try:
             try:
                 self.check()

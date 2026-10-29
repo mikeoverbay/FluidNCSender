@@ -26,8 +26,10 @@ import { jobActive } from './machine.js';
 import { mouseOnly } from './twostep.js';
 import { probeMayBeDown } from './jog.js';
 
-// (the user's UGS settings; the probe offset is where the probe sits from the bit: theirs is Y -3)
-const DEFAULTS = { minX: 0.5, minY: 1.0, maxX: 8.5, maxY: 12.0, xPoints: 15, yPoints: 5, zRetract: 0.2, probeOffX: 0, probeOffY: 0 };
+// (a first run: no area, Min / Max all 0, which Start Scan refuses, and no offset, which warns. The offset is the
+// spindle's distance from the probe: the user's is Y 3, and the probe touches at the bit's position minus it)
+const DEFAULTS = { minX: 0, minY: 0, maxX: 0, maxY: 0, xPoints: 15, yPoints: 5, zRetract: 0.2, probeOffX: 0, probeOffY: 0 };
+export const areaUnset = s => !!s && ['minX', 'maxX', 'minY', 'maxY'].every(k => num(s[k]) === 0);
 const KEYS = Object.keys(DEFAULTS);
 const LABEL = { minX: 'Min X', minY: 'Min Y', maxX: 'Max X', maxY: 'Max Y', xPoints: 'Points X', yPoints: 'Points Y', zRetract: 'Z retract',
   probeOffX: 'Probe offset X', probeOffY: 'Probe offset Y' };
@@ -65,6 +67,7 @@ export function checkSettings(s) {
     const n = v[`${a}Points`], A = a.toUpperCase();
     if (!Number.isInteger(n) || n < 1 || n > MAX_POINTS) return { error: `Points ${A}: a whole number from 1 to ${MAX_POINTS}`, key: `${a}Points` };
     const lo = v[`min${A}`], hi = v[`max${A}`];
+    if (areaUnset(v)) continue;          // (all 0: not set yet; Start Scan says so)
     if (lo > hi) return { error: `Min ${A} is more than Max ${A}`, key: `min${A}` };
     if (lo === hi && n > 1) return { error: `Min ${A} and Max ${A} are the same: that takes Points ${A} = 1`, key: `max${A}` };
   }
@@ -178,9 +181,10 @@ export class ScanPanel {
         <select id="scanPort" data-f="port" aria-label="The probe's serial port"></select>
         <button data-act="pconn">Connect</button>
         <button data-act="home" title="Home the probe (H): it retracts fully. Its first touch after that reads 0.0.">Home Probe</button>
-        <div class="sretract soffset" title="Where the probe sits from the spindle centerline (yours: Y -3, 3 in toward -Y). Saved. Min / Max are the job's own area; the bit moves by the opposite so the probe lands there, and the scan is saved at the spindle centerline's coordinates. Leave X/Y zero where the job is zeroed.">
+        <div class="sretract soffset" title="How far the spindle centerline is from the probe (yours: X 0, Y 3). Saved. The probe touches at the bit's position minus this, so the bit goes to each point plus it. Min / Max are the job's own area, and the scan is saved there: the probe data is shifted, never the G-code. Leave X/Y zero where the job is zeroed.">
           <label for="scanOffY">Offset from spindle</label><span class="dim">X</span>${box('id="scanOffX" data-k="probeOffX" aria-label="Probe offset X"')}<span class="dim">Y</span>${box('id="scanOffY" data-k="probeOffY" aria-label="Probe offset Y"')}<span class="dim">in</span>
         </div>
+        <div class="soffwarn amber" hidden>Offset 0, 0: set it (yours: Y 3)</div>
         <div class="spstate dim"></div>
         <div class="sdown amber" hidden></div>
       </section>
@@ -230,6 +234,7 @@ export class ScanPanel {
     this.progEl = q('.sprog');
     this.bar = q('.sbar i');
     this.msgEl = q('.smsg');
+    this.offWarn = q('.soffwarn');
     this.srcSel = q('[data-f=lsrc]');
     this.lInputs = Object.fromEntries([...this.root.querySelectorAll('[data-l]')].map(i => [i.dataset.l, i]));
     this.lmsgEl = q('.lmsg');
@@ -435,7 +440,9 @@ export class ScanPanel {
     for (const [k, input] of Object.entries(this.inputs)) input.classList.toggle('bad', c.key === k);
     this.valid = !!c.settings;
     let text = '', cls = 'dim';
-    if (c.error) { text = c.error; cls = 'bad'; } else {
+    if (c.error) { text = c.error; cls = 'bad'; } else if (areaUnset(c.settings)) {
+      text = 'Scan area not set: type Min / Max X and Y, or Use G-code area'; cls = 'amber';
+    } else {
       const v = c.settings, step = (lo, hi, n) => (n > 1 ? (hi - lo) / (n - 1) : 0);
       text = `${v.xPoints * v.yPoints} points, every ${fmt(step(v.minX, v.maxX, v.xPoints))} in X, `
         + `${fmt(step(v.minY, v.maxY, v.yPoints))} in Y`;
@@ -641,6 +648,7 @@ export class ScanPanel {
     if (pr.busy || this.busy) return 'The probe is busy';
     if (!pr.ready) return 'Home the probe first (Home Probe)';
     if (!this.valid) return 'Check the settings';
+    if (areaUnset(this.settings)) return 'Set the scan area first: Min / Max X and Y are all 0';
     return '';
   }
 
@@ -722,6 +730,8 @@ export class ScanPanel {
       : `Home the probe (H): it retracts fully. Its first touch after that reads 0.0.${down ? ' It is not homed now: its tip '
         + 'may be down, so home it before X or Y moves.' : ''}`);
     const why = this.startWhy();
+    const s = this.settings;
+    setAttr(this.offWarn, 'hidden', !s || !!(num(s.probeOffX) || num(s.probeOffY)));
     setAttr(b.start, 'disabled', !!why);
     setAttr(b.start, 'title', why ? `Start Scan: ${why}` : 'Start the scan: the machine moves to each point (X and Y only) and the probe measures it. Asks first.');
     setAttr(b.stop, 'disabled', !running);

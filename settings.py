@@ -5,7 +5,8 @@ FLUIDSENDER_SETTINGS names another file; the tests use a temporary one).
 Python standard library only. Keys:
     "jog"          {"step": 0.1, "feed": 150}: the jog step (in) and speed (in/min) the page and the pendant share
     "scan"         the surface scan settings (inches): minX, minY, maxX, maxY, xPoints, yPoints, zRetract, and
-                   probeOffX / probeOffY, where the probe sits from the spindle centerline (the user's: Y -3)
+                   probeOffX / probeOffY, the spindle centerline's offset from the probe (the user's: Y 3; the
+                   probe touches at the bit's position minus it)
     "probePort"    the probe's port when it was last connected (or null)
     "pendantPort"  the pendant's port when it was last connected (or null)
     "zeros"        Undo Zero's records, oldest first: the last 5 zeros (page or pendant), each with the work
@@ -34,9 +35,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 STEPS = (10, 1, 0.1, 0.01, 0.001)           # the jog steps there are buttons for (inches)
 MAX_FEED = 10000.0                          # in/min: any jog speed above this is a mistake
 JOG = {"step": 0.1, "feed": 150}            # the user's UGS settings: 0.1 in at 150 in/min
-SCAN = {"minX": 0.5, "minY": 1.0, "maxX": 8.5, "maxY": 12.0, "xPoints": 15, "yPoints": 5, "zRetract": 0.2,
-        "probeOffX": 0.0, "probeOffY": 0.0}
-MAX_OFFSET = 12.0                           # in: the probe's offset from the spindle centerline (the user's: Y -3)
+SCAN = {"minX": 0.0, "minY": 0.0, "maxX": 0.0, "maxY": 0.0, "xPoints": 15, "yPoints": 5, "zRetract": 0.2,
+        "probeOffX": 0.0, "probeOffY": 0.0}         # (a first run: no area and no offset until the user sets them)
+MAX_OFFSET = 12.0                           # in: the spindle's offset from the probe (the user's: Y 3)
 MAX_POINTS = 100                            # per axis
 MAX_TOTAL = 2000                            # points in a scan
 MAX_COORD = 100.0                           # in: a scan corner further out is a mistake
@@ -118,7 +119,8 @@ def check_scan(value):
     if v is None or not 0.01 <= v <= 2:
         raise SettingsError("Scan zRetract: a number from 0.01 to 2 in")
     out["zRetract"] = v
-    for axis in "XY":
+    unset = all(out[k] == 0 for k in ("minX", "maxX", "minY", "maxY"))     # (a first run: no area yet, scan.py)
+    for axis in "XY" if not unset else "":
         lo, hi, n = out[f"min{axis}"], out[f"max{axis}"], out[f"{axis.lower()}Points"]
         if lo > hi or (lo == hi and n > 1):
             raise SettingsError(f"Scan: min {axis} must be below max {axis} (the same only with 1 point in {axis})")

@@ -191,6 +191,7 @@ class Store:
         self.data[key] = value
 
 
+UGS = dict(scan.DEFAULTS, minX=0.5, minY=1.0, maxX=8.5, maxY=12.0)    # the user's UGS area (the defaults were once)
 SMALL = {"minX": 1.0, "maxX": 2.0, "minY": 0.5, "maxY": 1.0, "xPoints": 3, "yPoints": 2, "zRetract": 0.25,
          "probeOffX": 0.0, "probeOffY": 0.0}
 
@@ -269,10 +270,13 @@ class ScanCase(unittest.TestCase):
 
 
 class Settings(unittest.TestCase):
-    def test_defaults_are_the_users_ugs_settings(self):
-        self.assertEqual(check_settings(), {"minX": 0.5, "minY": 1.0, "maxX": 8.5, "maxY": 12.0, "xPoints": 15,
+    def test_first_run_defaults_have_no_area_and_no_offset(self):
+        """A first run makes nothing up: Min / Max all 0 (kept, but Start Scan refuses it) and offset 0, 0."""
+        self.assertEqual(check_settings(), {"minX": 0.0, "minY": 0.0, "maxX": 0.0, "maxY": 0.0, "xPoints": 15,
                                             "yPoints": 5, "zRetract": 0.2, "probeOffX": 0.0, "probeOffY": 0.0})
-        self.assertEqual(check_settings({"probeOffY": "-3"})["probeOffY"], -3.0)
+        self.assertTrue(scan.area_unset(check_settings()))
+        self.assertFalse(scan.area_unset(check_settings({"maxX": 1, "maxY": 1})))
+        self.assertEqual(check_settings({"probeOffY": "3"})["probeOffY"], 3.0)
         with self.assertRaises(MachineError) as cm:
             check_settings({"probeOffY": 13})
         self.assertEqual(str(cm.exception), "Probe offset Y must be from -12 to 12 in")
@@ -282,14 +286,14 @@ class Settings(unittest.TestCase):
         s = check_settings({"xPoints": "4", "maxX": " 2.5"}, saved)
         self.assertEqual(s, dict(SMALL, xPoints=4, maxX=2.5))
         self.assertIsInstance(s["xPoints"], int)
-        self.assertEqual(check_settings({"xPoints": 7.0})["xPoints"], 7)
-        self.assertEqual(check_settings({"minX": 3, "maxX": 3, "xPoints": 1})["minX"], 3.0)   # one point: may be equal
-        self.assertEqual(check_settings({"xPoints": 1})["maxX"], 8.5)     # (one point at min X)
-        self.assertEqual(check_settings({"xPoints": 100, "yPoints": 20})["xPoints"], 100)
+        self.assertEqual(check_settings({"xPoints": 7.0}, UGS)["xPoints"], 7)
+        self.assertEqual(check_settings({"minX": 3, "maxX": 3, "xPoints": 1}, UGS)["minX"], 3.0)   # one point: may be equal
+        self.assertEqual(check_settings({"xPoints": 1}, UGS)["maxX"], 8.5)     # (one point at min X)
+        self.assertEqual(check_settings({"xPoints": 100, "yPoints": 20}, UGS)["xPoints"], 100)
 
     def refused(self, data):
         with self.assertRaises(MachineError) as cm:
-            check_settings(data)
+            check_settings(data, UGS if isinstance(data, dict) else None)
         self.assertEqual(cm.exception.status, 400)
         return str(cm.exception)
 
@@ -314,7 +318,7 @@ class Settings(unittest.TestCase):
 
     def test_saved_settings_fall_back_to_the_defaults(self):
         self.assertEqual(load_settings(None), scan.DEFAULTS)
-        self.assertEqual(load_settings({"minX": 99}), scan.DEFAULTS)                # (more than max X)
+        self.assertEqual(load_settings({"minX": 99, "maxX": 1}), scan.DEFAULTS)     # (more than max X)
         self.assertEqual(load_settings(dict(SMALL, extra=1)), SMALL)               # (unknown keys ignored)
         self.assertEqual(load_settings({"xPoints": 3}), dict(scan.DEFAULTS, xPoints=3))
 
@@ -409,15 +413,23 @@ class Scans(ScanCase):
                                            "error", "message", "savedTo", "started", "finished"})
 
     def test_probe_offset(self):
-        """The probe sits 3 in toward -Y from the bit (the user's): the bit goes 3 in further in +Y, and the grid
-        and the file stay where the probe touched (the job's coordinates), so X/Y zero never has to move."""
-        st = self.run_scan(dict(SMALL, probeOffY=-3.0))
+        """Offset from spindle Y 3 (the user's: the probe sits 3 in toward -Y and touches at the bit's Y minus 3): the
+        bit goes to each point plus 3 in Y, and the grid and the file stay where the probe touched (the job's
+        coordinates). The probe data is shifted, so X/Y zero and the G-code never move."""
+        st = self.run_scan(dict(SMALL, probeOffY=3.0))
         self.assert_ended("done")
         self.assertEqual(self.machine.move_list(), [(1.0, 3.5), (1.0, 3.5), (1.0, 4.0), (1.5, 4.0), (1.5, 3.5),
                                                     (2.0, 3.5), (2.0, 4.0), (1.0, 3.5)])
         self.assertEqual((st["result"]["xs"], st["result"]["ys"]), ([1.0, 1.5, 2.0], [0.5, 1.0]))
         self.assertTrue(st["result"]["text"].startswith("# minX=1.00000 maxX=2.00000\n# minY=0.50000 maxY=1.00000\n"))
         self.assertIn(("info", "Scan point 2 of 6: X1.0000 Y1.0000 Z0.0100"), self.logs)
+
+    def test_no_scan_without_an_area(self):
+        """A first run's Min / Max all 0: Start Scan is refused before anything moves."""
+        with self.assertRaises(MachineError) as cm:
+            self.scanner.start(dict(SMALL, minX=0.0, maxX=0.0, minY=0.0, maxY=0.0))
+        self.assertEqual(str(cm.exception), scan.UNSET)
+        self.assertEqual([c for c in self.machine.calls if c[0] == "move"], [])
 
     def test_move_timeouts_like_ugs(self):
         self.run_scan()
@@ -495,10 +507,11 @@ class Scans(ScanCase):
         self.scanner.save(os.path.join(self.dir, "keep.xyz"))       # it can still be saved by hand
 
     def test_save_settings(self):
+        self.scanner.save_settings(UGS)
         out = self.scanner.save_settings({"xPoints": 4})
-        self.assertEqual(out, {"settings": dict(scan.DEFAULTS, xPoints=4)})
-        self.assertEqual(self.store.data["scan"], dict(scan.DEFAULTS, xPoints=4))
-        self.assertEqual(self.events[-1]["scan"]["settings"], dict(scan.DEFAULTS, xPoints=4))
+        self.assertEqual(out, {"settings": dict(UGS, xPoints=4)})
+        self.assertEqual(self.store.data["scan"], dict(UGS, xPoints=4))
+        self.assertEqual(self.events[-1]["scan"]["settings"], dict(UGS, xPoints=4))
         self.assertEqual(self.events[-1]["scan"]["points"], 20)
         with self.assertRaises(MachineError):
             self.scanner.save_settings({"xPoints": 0})
@@ -525,7 +538,7 @@ class RealScan(ScanCase):
         super().setUp()
 
     def test_same_file_as_ugs(self):
-        st = self.run_scan(scan.DEFAULTS, timeout=60)
+        st = self.run_scan(UGS, timeout=60)
         self.assertEqual(st["phase"], "done", st["error"])
         with open(os.path.join(self.scans, "last-scan.xyz"), "rb") as f:
             self.assertEqual(f.read(), REAL_SCAN.encode())
