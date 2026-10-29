@@ -126,6 +126,18 @@ export function levelCoverage(info) {
     + ' (the nearest edge\'s height is used there)';
 }
 
+const WRONG_SCAN = 0.05;      // more of the leveled points than this outside the scan: probably the wrong scan
+
+/** "⚠ WRONG SCAN? 56% of the points are outside ...", when so much of the G-code is outside the scan that the
+ *  scan is probably not this job's (an older file still chosen, or a scan of another area), else ''. */
+export function levelMismatch(info) {
+  const s = info?.stats;
+  if (!s || !(s.leveled > 0) || !(s.outside / s.leveled > WRONG_SCAN)) return '';
+  return `⚠ WRONG SCAN? ${Math.round(100 * s.outside / s.leveled)}% of the points are outside ${levelName(info)}, up to `
+    + `${Number.isFinite(s.maxOutside) ? s.maxOutside.toFixed(2) : '?'} in away: it doesn't cover this G-code. `
+    + 'Check the scan chosen under Apply to G-code';
+}
+
 /** The scan has every point (the server's result says so, or all points are in). */
 export function scanDone(scan) {
   if (!scan || scan.running) return false;
@@ -509,6 +521,7 @@ export class ScanPanel {
     this.source = 'file';
     store.set('level.file', path);
     store.set('level.source', 'file');
+    store.set('level.fileAt', Date.now() / 1000);     // (a scan that finishes later takes over: see update)
     this.show();
   }
 
@@ -602,8 +615,10 @@ export class ScanPanel {
       lines.push([`Leveled: ${from}${int(lev.lines)} lines${n ? ` · ${n} warning${n > 1 ? 's' : ''}` : ''}`, n ? 'amber' : 'good',
         [levelCoverage(lev.info), ...warnings].filter(Boolean).join('\n')]);
       if (s.outside > 0) {
-        lines.push([`${int(s.outside)} points outside the scan (up to ${Number.isFinite(s.maxOutside) ? s.maxOutside.toFixed(3) : '?'} in)`,
-          'bad', levelCoverage(lev.info)]);
+        const wrong = levelMismatch(lev.info);
+        lines.push([wrong ? `⚠ WRONG SCAN? ${Math.round(100 * s.outside / s.leveled)}% of the points are outside it`
+          : `${int(s.outside)} points outside the scan (up to ${Number.isFinite(s.maxOutside) ? s.maxOutside.toFixed(3) : '?'} in)`,
+          'bad', wrong || levelCoverage(lev.info)]);
       }
     } else if (lev.said) lines.push([lev.said, 'dim']);
     const key = JSON.stringify(lines);
@@ -665,6 +680,12 @@ export class ScanPanel {
     const running = !!m.scan?.running;
     if (running && !this.wasRunning) this.msg = null;      // (a new scan: its own messages from now on)
     this.wasRunning = running;
+    // A scan finished after the .xyz file was picked: level with the new scan, never quietly with the older file
+    if (this.source === 'file' && scanDone(m.scan) && +m.scan.finished > (+store.get('level.fileAt', 0) || 0)) {
+      this.source = 'last';
+      store.set('level.source', 'last');
+      this.msg = { text: `New scan: Apply to G-code now uses the last scan (not ${baseName(this.scanFile)})`, cls: 'amber' };
+    }
     const s = m.scan?.settings;
     // The server's settings (saved, or another window's), unless something was typed here just now
     if (s && KEYS.every(k => Number.isFinite(+s[k])) && !(performance.now() - (this.changedAt || -1e9) < 2000)) {

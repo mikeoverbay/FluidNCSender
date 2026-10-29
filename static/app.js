@@ -7,7 +7,7 @@ import { FileBrowser } from './files.js';
 import { MenuBar } from './menu.js';
 import { InfoPanel, MachinePanel, ConsolePanel, runWhy, fmtClock, undoWhen } from './panels.js';
 import { JogPanel } from './jog.js';
-import { ScanPanel, scanPoints, scanTotal, scanDone, scanResultGrid, levelName, levelCoverage } from './scan.js';
+import { ScanPanel, scanPoints, scanTotal, scanDone, scanResultGrid, levelName, levelCoverage, levelMismatch } from './scan.js';
 import { MachineClient, firmwareName, jobActive, jogSettingsOf } from './machine.js';
 import { ConnectDialog } from './connect.js';
 import { PendantDialog, pendantChip } from './pendant.js';
@@ -1139,7 +1139,9 @@ function levelNote() {
     const info = lev.info || {}, cover = levelCoverage(info);
     const arc = arcNote(info);
     const more = (info.warnings || []).filter(w => !/outside the scan/.test(w));
-    return `\n\nLEVELED with ${levelName(info)}${arc}: the moves' Z follows the scanned surface.`
+    const wrong = levelMismatch(info);
+    return (wrong ? `\n\n${wrong}. Cancel unless you are sure.` : '')
+      + `\n\nLEVELED with ${levelName(info)}${arc}: the moves' Z follows the scanned surface.`
       + (cover ? `\nWarning: ${cover}.` : '') + more.map(w => `\nWarning: ${w}.`).join('');
   }
   if (mach.program?.preLeveled) {
