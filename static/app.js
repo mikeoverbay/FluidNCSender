@@ -1402,13 +1402,18 @@ const xyzBrowser = new FileBrowser({
   pickOnDouble: true,
   storeKey: 'files.dir',
   onSelect: path => { xyzDlg.dataset.path = path; },
-  onPick: path => { xyzDlg.close(); scanPanel.levelFile(path); },
+  onPick: path => applyXyz(path),
 });
 xyzDlg.querySelector('.dbody').append(xyzBrowser.root);
-xyzDlg.querySelector('[data-act=ok]').onclick = () => {
-  const p = xyzDlg.dataset.path;
-  if (p) { xyzDlg.close(); scanPanel.levelFile(p); }
-};
+xyzDlg.querySelector('[data-act=ok]').onclick = () => applyXyz(xyzDlg.dataset.path);
+/** Apply .xyz file to G-code…: the file picked is loaded (the visualizer shows its data, it is the loaded scan
+ *  from now on) and the G-code is leveled with it. */
+async function applyXyz(path) {
+  if (!path) return;
+  xyzDlg.close();
+  await openScan(path);
+  scanPanel.levelFile(path);
+}
 function pickLevelScan() {
   xyzDlg.dataset.path = '';
   xyzBrowser.load(state.scanPath ? dirName(state.scanPath) : state.gcodePath ? dirName(state.gcodePath) : undefined);

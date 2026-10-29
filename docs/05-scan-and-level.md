@@ -43,7 +43,8 @@ example next to the job. Open a saved scan with **File → Open…** (any `.xyz`
    on**:
    - **Apply loaded scan (name)**: levels with the scan on screen: the scan just made here, or a `.xyz` you
      opened with **File → Open…** (or by clicking it in the Files panel). Its label names that scan.
-   - **Apply .xyz file to G-code…**: opens the file dialog; the `.xyz` you pick levels the G-code at once.
+   - **Apply .xyz file to G-code…**: opens the file dialog; the `.xyz` you pick **replaces the loaded scan** (the
+     visualizer shows its data) and levels the G-code at once.
 
    The one that is on **blinks bright red and names its scan** (*Loaded scan scan.xyz: ON*, or *other.xyz: ON*).
    Click it again to go back to the original G-code. Click the other box to level with that scan instead. If more
