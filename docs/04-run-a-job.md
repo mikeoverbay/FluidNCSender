@@ -20,10 +20,12 @@ You can edit the file. **Save** (Ctrl+S) keeps its CRLF line endings, and **Save
 - **Toolpath** shows or hides the cutting moves (G1/G2/G3); **Rapids** the rapid moves (G0); **Scan** the
   scanned surface. Also in the View menu.
 - **Z** stretches heights so small differences show.
-- While connected, the **machine's travel** is drawn in very transparent black: the floor (the bottom of Z's
-  travel) and the two walls on the machine's 0 sides of X and Y. FluidSender reads it from FluidNC when it
-  connects (`max_travel_mm` and `homing` of each axis) and moves it with your work zero, so a job that pokes
-  through a wall or the floor is beyond what the machine can reach.
+- **Machine** shows the **machine box**: the machine's travel as a dashed box, its home corner as a dot, and in
+  very transparent black the floor (the bottom of Z's travel) and the two walls on the machine's 0 sides of X
+  and Y. While connected it comes from FluidNC (`max_travel_mm` and `homing` of each axis, read when it
+  connects) and is remembered; the **⚙** button (or View → Machine Box Settings…) sets it by hand for when
+  FluidNC hasn't said. It moves with your work zero, so a job that pokes through a wall or the floor is beyond
+  what the machine can reach.
 - The **camera button** at the right end saves a picture of the view as a PNG,
   `<gcode name>-view-<date-time>.png`, in **Downloads**.
 

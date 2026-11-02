@@ -1,7 +1,7 @@
 // FluidSender: dockable panels, menus, file handling, machine connection, jobs, the surface scan, the pendant.
 
 import { parseGcode, parseScan, scanFromPoints, scanGrid } from './gcode.js';
-import { Viewer } from './viewer.js';
+import { Viewer, MACHINE_DEFAULTS } from './viewer.js';
 import { Editor } from './editor.js';
 import { FileBrowser } from './files.js';
 import { MenuBar } from './menu.js';
@@ -87,6 +87,82 @@ function status(text, kind = '') {
 }
 viewer.onMessage = text => status(text);
 viewer.shotName = () => gcodeName() || prog.name;      // (the screenshot button's file name)
+
+// The machine box (View → Machine Box Settings…): its settings, whether it is shown, and the last work offset seen
+// (so it sits right while not connected) are kept in this browser
+function machineBoxOf(v) {
+  const num = (a, i, d, min = -Infinity) => (Array.isArray(a) && Number.isFinite(+a[i]) && +a[i] >= min ? +a[i] : d[i]);
+  const D = MACHINE_DEFAULTS;
+  return {
+    size: [0, 1, 2].map(i => num(v?.size, i, D.size, 0.1)),
+    home: [0, 1, 2].map(i => (['min', 'max'].includes(v?.home?.[i]) ? v.home[i] : D.home[i])),
+    homeAt: [0, 1, 2].map(i => num(v?.homeAt, i, D.homeAt)),
+  };
+}
+viewer.setMachine(machineBoxOf(store.get('machine.box')));
+viewer.setOption('machine', store.get('machine.box.show', true) !== false);
+{
+  const w = store.get('machine.wco');
+  if (Array.isArray(w) && w.length >= 3 && w.every(Number.isFinite)) viewer.setWco(w);
+}
+viewer.onMachineShown = on => store.set('machine.box.show', on);
+viewer.onMachineSettings = () => showMachineBox();
+let wcoSaved = 0;
+function trackWco(st) {
+  const m = st?.mpos, w = st?.wpos;
+  if (!m || !w) return;
+  const wco = [0, 1, 2].map(i => m[i] - w[i]);
+  if (!wco.every(Number.isFinite)) return;
+  viewer.setWco(wco);
+  if (Date.now() - wcoSaved > 2000) { wcoSaved = Date.now(); store.set('machine.wco', viewer.wco); }
+}
+
+/** FluidNC's own travel (axes[a].travel: [min, max] in machine inches, read at connect) sets the machine box while
+ *  connected, and is kept in this browser so the box stays right afterwards; the dialog's values are the fallback
+ *  for when FluidNC hasn't said. The home end is the one nearest machine 0 (where FluidNC homes: mpos_mm). */
+function useFluidncTravel(axes) {
+  const t = [0, 1, 2].map(i => axes?.['xyz'[i]]?.travel);
+  if (!t.every(r => Array.isArray(r) && r.length === 2 && r.every(Number.isFinite) && r[1] > r[0])) return;
+  const home = t.map(([lo, hi]) => (Math.abs(hi) <= Math.abs(lo) ? 'max' : 'min'));
+  const m = { size: t.map(([lo, hi]) => +(hi - lo).toFixed(4)), home,
+    homeAt: t.map(([lo, hi], i) => (home[i] === 'max' ? hi : lo)) };
+  if (JSON.stringify(m) === JSON.stringify(viewer.machine)) return;
+  store.set('machine.box', m);
+  viewer.setMachine(m);
+}
+
+const mboxDlg = $('mboxDlg');
+const mboxField = f => mboxDlg.querySelector(`[data-f=${f}]`);
+function fillMachineBox(m, show) {
+  mboxField('show').checked = show;
+  for (let i = 0; i < 3; i++) {
+    mboxField('size' + i).value = m.size[i];
+    mboxField('home' + i).value = m.home[i];
+    mboxField('at' + i).value = m.homeAt[i];
+  }
+}
+function showMachineBox() {
+  fillMachineBox(viewer.machine, viewer.options.machine);
+  mboxDlg.querySelector('.cmsg').hidden = true;
+  mboxDlg.showModal();
+}
+mboxDlg.querySelector('[data-act=defaults]').onclick = () => fillMachineBox(MACHINE_DEFAULTS, true);
+mboxDlg.querySelector('[data-act=ok]').onclick = () => {
+  const size = [0, 1, 2].map(i => +mboxField('size' + i).value);
+  const homeAt = [0, 1, 2].map(i => +mboxField('at' + i).value);
+  const msg = mboxDlg.querySelector('.cmsg');
+  if (!size.every(v => Number.isFinite(v) && v >= 0.1) || !homeAt.every(Number.isFinite)
+      || [0, 1, 2].some(i => mboxField('at' + i).value.trim() === '')) {
+    msg.textContent = 'Each travel must be a number of at least 0.1 in, and each home MPos a number.';
+    msg.hidden = false;
+    return;
+  }
+  const m = { size, home: [0, 1, 2].map(i => mboxField('home' + i).value), homeAt };
+  store.set('machine.box', m);
+  viewer.setMachine(m);
+  viewer.setOption('machine', mboxField('show').checked);
+  mboxDlg.close();
+};
 onThemeChange(() => viewer.recolor());      // (the rest of the page follows the theme by itself: style.css)
 
 function gcodeName() {
@@ -889,19 +965,6 @@ const mach = {
 const live = () => mach.link === 'up' && mach.connected;
 const NOT_LIVE = { status: null, modal: null, axes: null, jog: null, zeroUndo: null, alarm: null };
 
-/** The machine's travel (FluidNC's max_travel and homing, machine coordinates) in work coordinates for the
- *  visualizer, moved by the work offset now (machine position - work position); the walls go on each axis's side
- *  nearest machine 0. null while not connected or not known. */
-function travelBox() {
-  const st = live() && mach.status, ax = mach.axes;
-  const t = ['x', 'y', 'z'].map(a => ax?.[a]?.travel);
-  if (!st || !Array.isArray(st.mpos) || !Array.isArray(st.wpos) || !t.every(r => Array.isArray(r))) return null;
-  const wco = st.mpos.map((m, i) => m - st.wpos[i]);
-  if (!wco.every(Number.isFinite)) return null;
-  const zero = [0, 1].map(i => (Math.abs(t[i][0]) <= Math.abs(t[i][1]) ? t[i][0] : t[i][1]) - wco[i]);
-  return { min: t.map((r, i) => r[0] - wco[i]), max: t.map((r, i) => r[1] - wco[i]), zero };
-}
-
 function machineChanged() {
   viewer.setPreLeveled(mach.program?.preLeveled);
   machinePanel.update(mach);
@@ -911,7 +974,7 @@ function machineChanged() {
   konsole.setEnabled(live(), running ? 'A job is running: typed lines are refused until it ends (? ! ~ on their own go at once)' : '');
   const w = live() && mach.status?.wpos;
   if (w) viewer.setTool(w[0], w[1], w[2]); else viewer.setTool(null);
-  viewer.setTravel(travelBox());
+  if (live()) { trackWco(mach.status); useFluidncTravel(mach.axes); }
   const fw = firmwareName(mach.firmware);
   $('sconn').textContent = live() ? `Connected: ${mach.port}${fw ? ' · ' + fw : ''}` : 'Not connected';
   $('sconn').classList.toggle('on', live());
@@ -1554,6 +1617,8 @@ new MenuBar($('menubar'), [
       viewOpt('toolpath', 'Show Toolpath'),
       viewOpt('rapids', 'Show Rapids'),
       viewOpt('scan', 'Show Scan Surface'),
+      viewOpt('machine', 'Show Machine Box'),
+      { label: 'Machine Box Settings…', action: () => { showPanel('viewer'); showMachineBox(); } },
       { separator: true },
       { label: 'Top View', action: () => { showPanel('viewer'); viewer.view('top'); } },
       { label: 'Iso View', action: () => { showPanel('viewer'); viewer.view('iso'); } },
