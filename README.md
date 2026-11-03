@@ -122,6 +122,32 @@ docs/             how-to guides
 This software moves a real machine. Keep a hand near the **E-stop**. FluidSender's Stop, Hold and Soft Reset are
 **not** a substitute for a hardware emergency stop.
 
+## Credits
+
+FluidSender builds on other people's work, and all credit for it goes to them:
+
+- **[Universal G-code Sender (UGS)](https://github.com/winder/Universal-G-Code-Sender)** by **Will Winder and
+  the UGS contributors** ([website and docs](https://winder.github.io/ugs_website/)), GPL-3.0. FluidSender's
+  **auto-leveler** and **surface scan** are based on UGS's: re-implemented in Python from UGS's source, so a program
+  is leveled exactly as UGS levels it, and scans are UGS `.xyz` files.
+- **[FluidNC](https://github.com/bdring/FluidNC)** by **Bart Dring and the FluidNC contributors**
+  ([documentation](http://wiki.fluidnc.com/)), GPL-3.0: the CNC controller FluidSender is made for.
+- **[three.js](https://github.com/mrdoob/three.js)** by **the three.js authors** ([docs](https://threejs.org/docs/)),
+  MIT: the 3D visualizer.
+- **[CodeMirror 5](https://github.com/codemirror/codemirror5)** by **Marijn Haverbeke and others**
+  ([manual](https://codemirror.net/5/doc/manual.html)), MIT: the G-code editor.
+- **[dockview](https://github.com/dockview/dockview)** by **the dockview authors** ([docs](https://dockview.dev/)),
+  MIT: the dockable panels.
+
+Details and the license texts: **[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)**.
+
+## License
+
+FluidSender is free software: you can redistribute it and/or modify it under the terms of the
+**[GNU General Public License](LICENSE)** as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version, the same terms as Universal G-code Sender, from which its
+auto-leveler and surface scan are derived. It comes with **no warranty**; see the license for details.
+
 ## Author
 
 [@mikeoverbay](https://github.com/mikeoverbay)

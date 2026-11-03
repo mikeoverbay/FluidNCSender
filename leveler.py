@@ -1,3 +1,13 @@
+# FluidSender: the auto-leveler. Copyright (C) 2025-2026 mikeoverbay (https://github.com/mikeoverbay).
+# Based on Universal G-code Sender's auto-leveler (MeshLeveler, ArcExpander, LineSplitter, GcodePreprocessorUtils,
+# CoordinateRewriteGuard), Copyright (C) Will Winder and the Universal G-code Sender contributors:
+# https://github.com/winder/Universal-G-Code-Sender (GNU GPL v3.0). All credit for its design goes to them.
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU General
+# Public License as published by the Free Software Foundation, either version 3 of the License, or (at your
+# option) any later version. It is distributed WITHOUT ANY WARRANTY; see the GNU General Public License (the
+# LICENSE file) for details.
+# SPDX-License-Identifier: GPL-3.0-or-later
 """
 Auto-leveling: the program's Z follows the scanned surface, as the user's UGS fork does it (surfacescanner
 Utils.createCommandProcessor: ArcExpander, then LineSplitter, then MeshLeveler, per line, in that order).
