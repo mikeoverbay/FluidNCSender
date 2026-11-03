@@ -85,21 +85,18 @@ sends its Pause and Stop keys now (True, False, or None: not known yet).
 """
 
 import errno
-import fcntl
 import math
 import os
 import re
-import select
 import struct
-import termios
 import threading
 import time
 import traceback
 from collections import namedtuple
 
 from job import ACTIVE
-from machine import (BAUDS, NO_RESUME, SAFE_Z, SCANS, SETTLE, MachineError, can_move, close_port, fixed, holders_text,
-                     open_port, port_kind, process_name, scan_holders)
+from machine import (NO_RESUME, SAFE_Z, SCANS, SETTLE, MachineError, can_move, close_port, fixed, holders_text,
+                     port_exists, open_port, port_kind, process_name, real_port, scan_holders)
 
 BAUD = 9600
 REQ_TIMEOUT = 10.0      # no REQ for this long: "waiting" (UGS's timeout; the pendant connects again by itself)
@@ -271,24 +268,14 @@ def other_programs(real):
     return holders_text([p for p in pids if not is_blueman_watcher(p)])
 
 
-def _waiting_out(fd):
-    """Bytes written to the port that haven't gone out yet (0 if the port can't say)."""
-    try:
-        return struct.unpack("i", fcntl.ioctl(fd, termios.TIOCOUTQ, b"\0" * 4))[0]
-    except OSError:
-        return 0
-
-
 class Session:
-    """One open pendant port: its fd, and the reader thread with its wake-up pipe and line buffer."""
+    """One open pendant port (a port object of the ports package, which wakes the reader too), and the reader thread
+    with its line buffer."""
 
-    def __init__(self, path, fd):
+    def __init__(self, path, port):
         self.path = path
-        self.fd = fd
-        self.wlock = threading.Lock()       # guards writes and closing the fds: a packet goes out whole
-        self.wake_r, self.wake_w = os.pipe()
-        os.set_blocking(self.wake_r, False)
-        os.set_blocking(self.wake_w, False)
+        self.port = port
+        self.wlock = threading.Lock()       # guards writes and closing the port: a packet goes out whole
         self.thread = None
         self.stopping = None                # (message, console kind) once closing
         self.rx = b""
@@ -297,11 +284,8 @@ class Session:
 
     def wake(self):
         with self.wlock:
-            if self.wake_w is not None:
-                try:
-                    os.write(self.wake_w, b"x")
-                except BlockingIOError:
-                    pass
+            if self.port is not None:
+                self.port.wake()
 
     def send(self, data, skip_busy=False):
         """Writes all of data; True if it went. False if the port is closed, if skip_busy and the last packet
@@ -309,13 +293,13 @@ class Session:
         WRITE_TIMEOUT. Raises OSError if the port is gone."""
         end = time.monotonic() + WRITE_TIMEOUT
         with self.wlock:
-            if self.fd is None:
+            if self.port is None:
                 return False
-            if skip_busy and _waiting_out(self.fd):
+            if skip_busy and self.port.unsent():
                 return False
             while data:
                 try:
-                    n = os.write(self.fd, data)
+                    n = self.port.write(data)
                 except BlockingIOError:
                     n = 0
                 data = data[n:]
@@ -371,9 +355,9 @@ class PendantLink:
         ports = data["ports"]
         with self.lock:
             mine = self.session.path if self.session else None
-        holders = scan_holders({os.path.realpath(p["path"]) for p in ports})
+        holders = scan_holders({real_port(p["path"]) for p in ports})
         for p in ports:
-            pids = [pid for pid in holders.get(os.path.realpath(p["path"]), []) if pid != os.getpid()]
+            pids = [pid for pid in holders.get(real_port(p["path"]), []) if pid != os.getpid()]
             if p["path"] == mine:
                 p["inUseBy"] = "FluidSender (pendant connected)"
             elif pids and all(is_blueman_watcher(pid) for pid in pids):
@@ -396,12 +380,7 @@ class PendantLink:
                 raise MachineError("Already connecting the pendant", 409)
             self.connecting = True
         try:
-            fd = self._open(path, bool(force))
-            try:
-                s = Session(path, fd)
-            except OSError as e:
-                close_port(fd)
-                raise MachineError(f"Could not start the pendant's reader ({e.strerror or e})") from None
+            s = Session(path, self._open(path, bool(force)))
             s.thread = threading.Thread(target=self._run, args=(s,), name=f"pendant {path}", daemon=True)
             with self.lock:
                 self.session = s
@@ -431,8 +410,8 @@ class PendantLink:
 
     def _open(self, path, force):
         m = self.machine
-        real = os.path.realpath(path)
-        if real not in {os.path.realpath(p) for p in m.extra}:
+        real = real_port(path)
+        if real not in {real_port(p) for p in m.extra}:
             kind = port_kind(real)
             if kind == "usb-serial":        # (never, even with force: opening it can reset FluidNC's ESP32)
                 raise MachineError(f"{path} is a USB serial port like FluidNC's, not the pendant (Bluetooth, "
@@ -442,10 +421,10 @@ class PendantLink:
             if kind == "usb-acm" and not force:
                 raise MachineError(f"{path} looks like the Z probe (Arduino Leonardo), not the pendant. "
                                    "Not connected.")
-        if not os.path.exists(real):
+        if not port_exists(real):
             raise MachineError(f"{path} is not there. Is the pendant on, and its serial port connected in Blueman?")
         link = m.link
-        if link is not None and os.path.realpath(link.path) == real:
+        if link is not None and real_port(link.path) == real:
             raise MachineError(f"{path} is the FluidNC port", 409)
 
         def in_use(others):
@@ -453,12 +432,12 @@ class PendantLink:
         others = other_programs(real)
         if others:
             raise in_use(others)
-        fd = open_port(real, BAUDS[BAUD])
+        port = open_port(real, BAUD)
         others = other_programs(real)       # someone may have opened it just before we locked it
         if others:
-            close_port(fd)
+            close_port(port)
             raise in_use(others)
-        return fd
+        return port
 
     def _remembered(self):
         try:
@@ -514,15 +493,9 @@ class PendantLink:
                     if s.stopping:
                         break
                     self._tick(s, time.monotonic())
-                ready = select.select([s.fd, s.wake_r], [], [], TICK)[0]
-                if s.wake_r in ready:
+                if s.port.wait(TICK):
                     try:
-                        os.read(s.wake_r, 512)
-                    except BlockingIOError:
-                        pass
-                if s.fd in ready:
-                    try:
-                        data = os.read(s.fd, 4096)
+                        data = s.port.read(4096)
                     except BlockingIOError:
                         continue
                     if not data:
@@ -544,13 +517,9 @@ class PendantLink:
 
     def _close(self, s):
         with s.wlock:
-            fd, s.fd = s.fd, None
-            wake, s.wake_r, s.wake_w = (s.wake_r, s.wake_w), None, None
-        if fd is not None:
-            close_port(fd)
-        for w in wake:
-            if w is not None:
-                os.close(w)
+            port, s.port = s.port, None
+        if port is not None:
+            close_port(port)
         with self.lock:
             message, kind = s.stopping or ("", "info")
             if self.session is s:

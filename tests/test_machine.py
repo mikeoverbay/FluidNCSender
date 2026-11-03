@@ -277,8 +277,7 @@ class Harness(unittest.TestCase):
         self.lines = []                 # lines written
 
     def tearDown(self):
-        for fd in (self.link.wake_r, self.link.wake_w):
-            os.close(fd)
+        self.link.port.close()          # (its wake-up pipe; fd -1 is no port)
 
     def reply(self, *lines, dt=0.01):
         for line in lines:

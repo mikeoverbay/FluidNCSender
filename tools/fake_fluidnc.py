@@ -10,6 +10,8 @@ the machine.
                                   [--late-events] [--no-verbose-errors] [--clean-reset]
                                   [--surface Z[,SX,SY]] [--probe-closed]
 
+(serve_socket() runs one on a socket instead, in a thread: FluidSender's Demo machine, ports/demo.py.)
+
 The first line it prints is the port to connect to (e.g. /dev/pts/7). To use it from the page:
 
     FLUIDSENDER_EXTRA_PORTS=/dev/pts/7 FLUIDSENDER_ONLY_EXTRA_PORTS=1 python3 server.py --port 8790
@@ -194,7 +196,6 @@ import signal
 import struct
 import sys
 import time
-import tty
 from collections import deque
 
 RAPID = 5000.0        # mm/min for G0 (then capped per axis like any move)
@@ -314,6 +315,7 @@ class FakeFluidNC:
         self.probe_closed = probe_closed     # the probe input always closed (--probe-closed)
         self.probing = None                  # a probe move under way: {"hit": None, then True}
         self.fd = fd
+        self.write_bytes = lambda data: os.write(fd, data)   # (serve_socket: the socket's instead)
         self.late_events = late_events       # override bytes and toggles act after the lines read with them
         self.vfd_sync = vfd_sync             # s the protocol task waits for a VFD at a spindle override change
         self.fw = fw                         # "4.1.1" or "3.9.4"
@@ -403,7 +405,7 @@ class FakeFluidNC:
 
     def send(self, text):
         try:
-            os.write(self.fd, (text + "\r\n").encode())
+            self.write_bytes((text + "\r\n").encode())
         except OSError:
             pass                             # full buffer or nobody there: lost, like a real UART
 
@@ -1243,7 +1245,36 @@ class FakeFluidNC:
         self.send("<" + "|".join(parts) + ">")
 
 
+def serve_socket(sock, stop=None, **options):
+    """Runs a simulator (FakeFluidNC(**options)) on one end of a connected socket, until the other end is closed
+    or stop (a threading.Event) is set; then closes its end. FluidSender's Demo machine runs it in a thread
+    (ports/demo.py): sockets, unlike a pseudo terminal, are there on Windows too."""
+    sock.settimeout(1.0)             # (a write the other end takes nothing of for 1 s is lost, like a full UART)
+    sim = FakeFluidNC(None, **options)
+    sim.write_bytes = sock.sendall
+    last = time.monotonic()
+    try:
+        sim.tick(last, 0.0)          # the boot banner
+        while not (stop and stop.is_set()):
+            ready = select.select([sock], [], [], TICK)[0]
+            now = time.monotonic()
+            if ready:
+                try:
+                    data = sock.recv(4096)
+                except OSError:
+                    break
+                if not data:
+                    break            # FluidSender closed its end (Disconnect)
+                sim.receive(data, now)
+            now = time.monotonic()
+            sim.tick(now, now - last)
+            last = now
+    finally:
+        sock.close()
+
+
 def main():
+    import tty                       # (POSIX only: serve_socket works without it)
     ap = argparse.ArgumentParser(description="A pretend FluidNC on a pseudo terminal")
     ap.add_argument("--fw", choices=FIRMWARES, default="4.1.1", help="the FluidNC version it acts as (4.1.1)")
     ap.add_argument("--alarm", action="store_true", help="boot in Alarm with every axis unhomed (must home)")

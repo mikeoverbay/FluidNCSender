@@ -5,6 +5,8 @@ import { store } from './api.js';
 
 // Ports the server refuses unless forced: probably the probe or the pendant, not FluidNC
 const RISKY = { 'usb-acm': 'the Z probe (Arduino Leonardo)', bluetooth: 'the Bluetooth jog pendant' };
+// The server lists the Demo machine last (a simulated FluidNC, no port): only chosen by hand, or as the last used
+const DEMO = 'demo';
 
 export class ConnectDialog {
   /** dlg: the <dialog> element; machine: a MachineClient; log(text, kind): app messages. */
@@ -53,15 +55,18 @@ export class ConnectDialog {
     for (const p of this.ports) {
       const o = document.createElement('option');
       o.value = p.path;
-      o.textContent = `${p.path} — ${p.label || p.product || p.kind}` + (p.inUseBy ? `  (in use by ${p.inUseBy})` : '');
+      o.textContent = (p.kind === DEMO ? p.label || p.path : `${p.path} — ${p.label || p.product || p.kind}`)
+        + (p.inUseBy ? `  (in use by ${p.inUseBy})` : '');
       o.disabled = !!p.inUseBy;
       this.portSel.append(o);
     }
     // Preselect the last port used, else the server's pick (the first free ttyUSB), else another free port.
     // Never the probe or the pendant: those can only be chosen by hand (and then asked about).
     const safe = this.ports.filter(p => !p.inUseBy && !RISKY[p.kind]);
-    const pick = safe.find(p => p.path === store.get('machine.port')) || safe.find(p => p.path === data.default) || safe[0];
-    const busy = this.ports.find(p => p.inUseBy && !RISKY[p.kind]);    // FluidNC's port, held by UGS?
+    const pick = safe.find(p => p.path === store.get('machine.port')) || safe.find(p => p.path === data.default)
+      || safe.find(p => p.kind !== DEMO);
+    const busy = this.ports.find(p => p.inUseBy && !RISKY[p.kind] && p.kind !== DEMO);    // FluidNC's port, held by UGS?
+    const demo = this.ports.some(p => p.kind === DEMO) ? ' Or choose the Demo machine to try FluidSender without one.' : '';
     if (!this.ports.length) {
       this.portSel.innerHTML = '<option>(no serial ports found)</option>';
       this.message('No serial ports found. Is the FluidNC controller plugged in (USB)?', 'err');
@@ -73,7 +78,7 @@ export class ConnectDialog {
       } else if (busy) {
         this.message(`${busy.path} is in use by ${busy.inUseBy}. Disconnect it there first, then press Refresh.`, 'err');
       } else {
-        this.message('No free FluidNC port (USB serial). Is the controller plugged in? Press Refresh to look again.', 'err');
+        this.message('No free FluidNC port (USB serial). Is the controller plugged in? Press Refresh to look again.' + demo, 'err');
       }
     }
     this.okBtn.disabled = !this.selected();
@@ -107,7 +112,7 @@ export class ConnectDialog {
     store.set('machine.baud', baud);
     this.busy = true;
     this.okBtn.disabled = true;
-    this.message(`Connecting to ${p.path} at ${baud}…`);
+    this.message(p.kind === DEMO ? 'Starting the Demo machine…' : `Connecting to ${p.path} at ${baud}…`);
     try {
       await this.machine.connect(p.path, baud, force);
       this.dlg.close();

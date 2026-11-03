@@ -493,8 +493,8 @@ class EndToEnd(unittest.TestCase):
 
         st, data = self.call("/api/machine/ports")
         self.assertEqual(st, 200)
-        self.assertEqual([p["path"] for p in data["ports"]],                # only the test ports
-                         [s.path for s in self.sims] + [t.path for t in self.tools])
+        self.assertEqual([p["path"] for p in data["ports"]],                # only the test ports, and the Demo machine
+                         [s.path for s in self.sims] + [t.path for t in self.tools] + ["Demo machine"])
         self.assertIsNone(data["default"])                # no ttyUSB here
         p = data["ports"][0]
         self.assertEqual((p["kind"], p["label"], p["inUseBy"]), ("pty", "Pseudo terminal (simulator?)", None))
