@@ -18,9 +18,9 @@ import { THEMES, currentTheme, setTheme, onThemeChange } from './theme.js';
 const DV = globalThis['dockview-core'];
 const $ = id => document.getElementById(id);
 const GCODE_EXT = /\.(nc|gcode|ngc|tap)$/i;
-const LAYOUT_KEY = 'layout.v5';     // v5: Machine + Jog take the whole left side; under the visualizer and the
+const LAYOUT_KEY = 'layout.v6';     // v5: Machine + Jog take the whole left side; under the visualizer and the
                                     // editor column the bottom row is Scan (left) | Console (right); Files /
-                                    // Toolpath are tabs below the editor
+                                    // Toolpath are tabs below the editor. v6: the user's proportions (defaultSizes)
 for (const old of ['layout.v1', 'layout.v2', 'layout.v3', 'layout.v4']) store.remove(old);
 const UPLOAD_MS = 1000;             // the edited G-code goes to the server this long after the last change
 
@@ -227,9 +227,14 @@ function addPanel(id, extra = {}) {
 }
 
 const TAB_BAR = 35;      // dockview's tab bar above each group
-// The bottom row (Scan | Console): this share of the dock's height, at least BOTTOM_MIN px, more if the Scan
-// panel's columns need it (BOTTOM_MAX at most); Scan gets SCAN_SHARE of the row's width, more if its columns need it
-const BOTTOM_SHARE = 0.3, BOTTOM_MIN = 210, BOTTOM_MAX = 0.4, SCAN_SHARE = 0.55, SCAN_MAX = 0.66;
+// The default layout, in the user's proportions (their 1920 x 1080 screen: Machine / Jog 340 px wide, the
+// Editor / Files / Console column 470 px, the bottom row 233 px of a 962 px dock, Machine 650 px high):
+// the bottom row (Scan | Console) gets BOTTOM_SHARE of the dock's height, at least BOTTOM_MIN px, more if the Scan
+// panel's columns need it (BOTTOM_MAX at most); the right column RIGHT_SHARE of the width (RIGHT_MIN px at least),
+// and Scan the rest of the row, so it sits under the visualizer and Console under the right column
+const BOTTOM_SHARE = 0.242, BOTTOM_MIN = 210, BOTTOM_MAX = 0.4, RIGHT_SHARE = 0.245, RIGHT_MIN = 380;
+const MACHINE_SHARE = 0.675;    // Machine's share of the dock's height (Jog: the rest)
+const SCAN_SHARE = 0.55, SCAN_MAX = 0.66;     // (placeFor: Scan's share of the row when it is opened again)
 
 function defaultLayout() {
   dock.clear();
@@ -267,10 +272,11 @@ function defaultSizes() {
   const machineWidth = Math.min(340, Math.max(290, Math.round(r.width * 0.24)));
   size('machine', { width: machineWidth });
   const row = r.width - machineWidth;           // the bottom row's width (and the visualizer and editor's)
-  size('editor', { width: Math.min(560, Math.max(380, Math.round(r.width * 0.3))) });
-  // The bottom row: Scan as wide as its columns need (about 55 % of the row), then as high as they need
-  // at that width (about 30 % of the dock), so every Scan control shows without scrolling
-  const scanWidth = Math.round(Math.min(row * SCAN_MAX, Math.max(row * SCAN_SHARE, scanPanel.neededWidth())));
+  const right = Math.max(RIGHT_MIN, Math.round(r.width * RIGHT_SHARE));   // the Editor / Files / Console column
+  size('editor', { width: right });
+  // The bottom row: Scan under the visualizer (the row less the right column), then as high as its controls
+  // need at that width, so every Scan control shows without scrolling
+  const scanWidth = Math.max(0, row - right);
   size('scan', { width: scanWidth });
   const bottom = Math.round(Math.min(r.height * BOTTOM_MAX, Math.max(BOTTOM_MIN, r.height * BOTTOM_SHARE,
     scanPanel.neededHeight(scanWidth) + TAB_BAR)));
@@ -280,7 +286,8 @@ function defaultSizes() {
   size('editor', { height: Math.round(top * 0.55) });     // Files / Toolpath below it get the rest
   // Machine on top, the whole Jog panel below it; in a short window the position (DRO) comes first.
   // (Measured once the widths are set: the text wraps by them.)
-  size('machine', { height: Math.max(machinePanel.neededHeight() + TAB_BAR, r.height - jogPanel.fullHeight() - TAB_BAR) });
+  size('machine', { height: Math.max(machinePanel.neededHeight() + TAB_BAR, Math.round(r.height * MACHINE_SHARE),
+    r.height - jogPanel.fullHeight() - TAB_BAR) });
 }
 
 /** Where a closed panel goes back when it is opened from the View menu. */
