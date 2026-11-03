@@ -30,9 +30,10 @@ for it, so nothing runs in millimeters. Everything else comes from the user: typ
 realtime buttons, and the Jog, Zero, Home and Unlock buttons, whose lines ($J=, G10 L20 (G10 L2 for
 Undo Zero), $H, $X; jogs always with G20, G10 with G20, or with G21 if the user has chosen
 millimeters: a units word in a G10 stays in force) the console shows like typed ones; Go to XY/Z zero
-(G20 G90 G0 ..., G53 G0 ... for machine zero); the vacuum and AUX switches (FluidNC's realtime toggles
-0xA0 and 0xA1); the feed, rapid and spindle overrides (its realtime bytes 0x90-0x9D); and Run, Hold, Resume
-and Stop. FluidNC 4.1.1 (the user's) and 3.9.4 both work.
+(G20 G90 G0 ..., G53 G0 ... for machine zero); the user's macros (Motion control -> Macros: their
+lines, from settings.json, one after another as typed ones: see run_macro); the vacuum and AUX switches
+(FluidNC's realtime toggles 0xA0 and 0xA1); the feed, rapid and spindle overrides (its realtime bytes
+0x90-0x9D); and Run, Hold, Resume and Stop. FluidNC 4.1.1 (the user's) and 3.9.4 both work.
 
 A job (Run) streams the loaded program, after a G20 G90 of FluidSender's own (a program without
 units runs in inches, as right after connecting; its own G21 or G91 still win): as many of its lines
@@ -812,8 +813,8 @@ class Line:
                                             # 'job': a line of a job; 'coolant': a $G for the vacuum/AUX state
         self.quiet = quiet                  # not in the console, nor its ok (an error is, with the line)
         self.tag = tag                      # the button that made it: 'step', 'zero', 'undo', 'home', 'unlock',
-                                            # 'goto'; 'scan': a scan move
-        self.no = None                      # a job line's line number in the file
+                                            # 'goto', 'macro'; 'scan': a scan move
+        self.no = None                      # a job line's line number in the file; a macro line's (1, 2...)
         self.size = len(text) + 1           # bytes it takes in FluidNC's serial buffer
         self.reply = None                   # 'ok', 'error:N', or 'dropped' (by a reset); once answered ...
         self.done_at = None                 # ... and when
@@ -943,6 +944,7 @@ class Link:
         self.prb = None                     # FluidNC's last probe result (see probe_report) ...
         self.prbs = 0                       # ... and how many have come
         self.check = {"stage": None, "at": None}    # the probe check the touch scan needs (see track_probe)
+        self.macro = None                   # the macro running: {"name", "line", "total"} (see run_macro)
 
     # -------------------------------------------------- thread and port
 
@@ -1227,6 +1229,8 @@ class Link:
         self.inflight = head
         self.after_reset = None             # (from now on a reply is this line's)
         self.out.append(head.text.encode() + b"\n")
+        if head.tag == "macro":
+            self.macro_line(head)
         if not head.quiet:
             self.machine.log("tx", head.text)
 
@@ -1313,6 +1317,7 @@ class Link:
         line, not to the next one: so no more lines go out until it comes, or a reset or Disconnect."""
         self.inflight = None
         self.owed = line
+        self.end_macro(f"no reply to {line.text}")
         n = len(self.queue)
         self.queue.clear()
         msg = f"No reply to '{line.text}' within {line.timeout:g} s"
@@ -1666,6 +1671,8 @@ class Link:
             self.out.append(self.stop_jog(now, f"FluidNC answered {reply}"))
         elif line.tag == "goto":
             self.goto_refused(line, reply)
+        elif line.tag == "macro":
+            self.end_macro(f"{line.text} was refused: {explain(reply)}", line.data)
         elif line.auto == "connect" and line.text == "$I" and self.status and self.status["state"] == "Alarm":
             # FluidNC refuses $I in a critical alarm only (which it reports as Alarm): connected after a hard
             # or soft limit, when its "Reset to continue" was printed before we were here
@@ -1673,6 +1680,8 @@ class Link:
                              "so only a Soft Reset gets out of it")
             self.set_alarm(dict(self.alarm or {"code": None, "text": f"$I: {reply}", "outputs": self.outputs_on()},
                                 critical=True))
+        if line.tag == "macro" and reply == "ok" and line.no == line.data["total"]:
+            self.end_macro(None, line.data)     # (its last line: done)
         if line.auto == "settings" and line.text in COOLANT_PIN_READS:
             key = COOLANT_PIN_READS[line.text]
             if self.coolant_pins[key] is None:  # (refused, or an ok with no value: the pin is unknown, so its
@@ -1723,6 +1732,35 @@ class Link:
         for q in rest:
             q.reply = "dropped"
         self.machine.log("error", f"{line.data['name']} stopped: {line.text} was refused ({reply})")
+
+    # -------------------------------------------------- macros (lock held)
+
+    def macro_line(self, line):
+        """A macro's line is going out: the console and the pages say which one ("Running macro ...: line 2 of 3")."""
+        run = line.data
+        if run is not self.macro:           # (a line of a macro already ended: it was dropped, never sent)
+            return
+        run["line"] = line.no
+        self.machine.log("info", f"Running macro {run['name']}: line {line.no} of {run['total']}")
+        self.machine.emit({"type": "macro", "macro": dict(run)})
+
+    def end_macro(self, why, run=None):
+        """The running macro is over: done (why None), or stopped (why: a refused line, Feed Hold, Stop, an alarm, a
+        reset...), its lines not sent yet dropped. run: only if it is that one (None: whichever runs)."""
+        if self.macro is None or (run is not None and run is not self.macro):
+            return
+        run, self.macro = self.macro, None
+        rest = [q for q in self.queue if q.tag == "macro" and q.data is run]
+        if rest:
+            self.queue = deque(q for q in self.queue if not any(q is r for r in rest))
+            for q in rest:
+                q.reply = "dropped"
+        if why is None:
+            self.machine.log("info", f"Macro {run['name']} done")
+        else:
+            left = f"; {len(rest)} line{'s' * (len(rest) != 1)} of it not sent" if rest else ""
+            self.machine.log("error", f"Macro {run['name']} stopped: {why}{left}")
+        self.machine.emit({"type": "macro", "macro": None})
 
     # -------------------------------------------------- jobs (lock held)
 
@@ -1973,7 +2011,8 @@ class Link:
     def soft_reset(self, now, why):
         """Ctrl-X: FluidNC stops at once and restarts (in G21 again). Drops the lines waiting here (but the axis
         setting reads, which any state answers) and forgets the job lines FluidNC had (a reset empties its
-        buffer: they are never answered); ends every jog and the job. Nothing goes until its banner."""
+        buffer: they are never answered); ends every jog, the job and a macro. Nothing goes until its banner."""
+        self.end_macro(why)
         keep = deque(line for line in self.queue if line.auto == "settings")
         dropped = [line for line in self.queue if line.auto != "settings"]
         if dropped:
@@ -2144,6 +2183,7 @@ class Link:
         (FluidNC, 3.9.4 and 4.1.1, may still run one line it had taken during a hold: see stray.)"""
         m = self.machine
         m.log("info", "*** Controller reset")
+        self.end_macro("FluidNC was reset")
         self.check = {"stage": None, "at": None}    # (a reset or an alarm: check the probe again)
         n = sum(1 for line in (*self.queue, self.inflight) if line and not line.quiet)
         if n:
@@ -2414,6 +2454,7 @@ class Link:
         if self.hold:
             self.out.append(self.stop_jog(now, text))
         self.halt = self.resume_at = None   # (an alarm stops every move: nothing left to stop or resume)
+        self.end_macro(text)                # (its next lines would only be refused: error:9)
         if job:                             # nothing more of it goes (FluidNC answers what it has: error:9)
             self.end_job(now, "failed", explain(text), explain(text))
         if halt is not None:
@@ -2758,7 +2799,7 @@ class Machine:
     The page's calls: connect, disconnect, send (a typed line), realtime (hold, resume, reset, status,
     jogcancel), jog (step, or start/keep/stop a hold jog), zero (or undo it), home, unlock, coolant
     (the vacuum and AUX switches), goto, load_program, level (auto-level: leveling.py), run, stop (the safe
-    stop) and set_jog_settings.
+    stop), set_jog_settings, set_macros and run_macro (Motion control -> Macros).
     The pendant uses the same calls (and pause_toggle, jog_settings, pendant_status); the scanner
     begin_activity, scan_move, end_activity, stop, work_setup, scan_complete and scan_raise; the touch scan
     (touchscan.py) the same, with touch_line for its lines. Refused calls raise
@@ -2941,6 +2982,7 @@ class Machine:
         if extras is None:
             extras = self.extra_states()
         jog = self.settings.get("jog")
+        macros = self.settings.get("macros")
         with self.lock:
             link = self.link if self.link and self.link.connected else None
             now = self.clock()
@@ -2957,6 +2999,8 @@ class Machine:
                 "program": self.leveling.info(self.program),     # (with "leveled" when it is a leveled one)
                 "job": self.job.info(now) if self.job else None,
                 "jogSettings": jog,
+                "macros": macros,
+                "macroRun": dict(link.macro) if link and link.macro else None,
             }
             snap.update(self.merge_extras(extras))
             self.leveling.snapshot(snap)    # ("level": the saved auto-level settings, once there are any)
@@ -3168,6 +3212,7 @@ class Machine:
                     link.stop_jog(now, "Feed Hold")     # FluidNC takes '!' while jogging as a jog cancel
                 link.feed_hold(now)
                 link.hold_job(now)
+                link.end_macro("Feed Hold")     # (its lines not sent yet; Resume runs what FluidNC has already)
             else:
                 if cmd == "jogcancel":
                     link.stop_jog(now)
@@ -3651,7 +3696,8 @@ class Machine:
         it made (its thread then raises Z: scan_raise); a job gets the safe stop (Link.safe_stop); a
         jog the jog cancel; anything else that may move (Link.may_move: also a move whose ok has just come,
         before a report shows it running), or lines waiting, the safe stop too. Returns {"stopped": "scan" |
-        "job" | "jog" | "motion" | None (nothing was going on)}."""
+        "job" | "jog" | "motion" | None (nothing was going on)}. A macro running gets the safe stop too ("motion"): its
+        lines not sent yet are dropped first."""
         with self.lock:
             scanning = self.activity in SCANS
             if scanning:
@@ -3681,6 +3727,10 @@ class Machine:
                 for line in [line for line in link.queue if line.tag == "scan"]:
                     link.queue.remove(line)
                     line.reply = "dropped"
+            if link.macro is not None:      # (its lines not sent yet never go; the one running gets the safe stop)
+                link.end_macro("Stopped by the user")
+                stopped = stopped or "macro"
+                moving = moving or link.inflight is not None
             if link.reset_at is not None:   # our reset is under way: it stops everything
                 pass
             elif link.job_active():
@@ -3689,9 +3739,9 @@ class Machine:
             elif link.jog_active():
                 link.out.append(link.stop_jog(now, "Stop"))
                 stopped = stopped or "jog"
-            elif link.halt or moving or link.queue:
+            elif link.halt or moving or link.queue or stopped == "macro":
                 link.safe_stop(now, "Stopped by the user")
-                stopped = stopped or "motion"
+                stopped = "motion" if stopped in (None, "macro") else stopped
         link.wake()
         return {"stopped": stopped}
 
@@ -3749,6 +3799,68 @@ class Machine:
         if new != old:
             self.emit({"type": "jogsettings", "step": new["step"], "feed": new["feed"]})
         return new
+
+    # -------------------------------------------------- macros
+
+    def macros(self):
+        """The macros, in order: [{"name", "code"}] (settings.json's, or settings.MACROS)."""
+        return self.settings.get("macros")
+
+    def set_macros(self, macros):
+        """The whole macro list, as the page edited it (checked: settings.check_macros); every page shows it (event
+        "macros"). Works while disconnected. Returns {"macros": [...]} as kept."""
+        if isinstance(macros, dict):
+            macros = macros.get("macros")
+        try:
+            old = self.settings.get("macros")
+            new = self.settings.set("macros", macros)
+        except SettingsError as e:
+            raise MachineError(str(e)) from None
+        if new != old:
+            self.emit({"type": "macros", "macros": new})
+        return {"macros": new}
+
+    def run_macro(self, name=None, index=None):
+        """Runs a macro ({"name"}, or {"index"}: its place in the list, from 0): its lines go through the line queue
+        in order, as typed ones (shown in the console), one after another. Only when FluidSender could send a
+        Go to: connected, Idle, no job, scan, jog or line waiting. If FluidNC refuses a line (or an alarm, a reset,
+        Feed Hold or Stop comes), the rest don't go (see Link.end_macro). Returns {"name", "lines": [...]}."""
+        if isinstance(name, dict):
+            name, index = name.get("name"), name.get("index")
+        macros = self.settings.get("macros")
+        if isinstance(name, str):
+            macro = next((m for m in macros if m["name"].lower() == " ".join(name.split()).lower()), None)
+            if macro is None:
+                raise MachineError(f"There is no macro named \"{name}\"")
+        elif isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(macros):
+            macro = macros[index]
+        else:
+            raise MachineError("Run which macro? Give its name")
+        lines = macro["code"].split("\n")
+        with self.lock:
+            link = self.live()
+            now = self.clock()
+            why = (f"Macro {link.macro['name']} is running" if link.macro else None)
+            why = why or self.activity_why(link) or link.state_why(now, ("Idle",)) or link.line_why(True)
+            if not why and link.jogging():
+                why = "Jogging: wait until it has stopped"
+            if not why and link.fresh_state(now) != "Idle":
+                why = "FluidNC is busy; try again in a second"
+            if not why and link.inch and link.inch_tries >= INCH_TRIES:
+                why = f"Not sent: {NO_INCHES}"
+            if not why and len(lines) > MAX_QUEUE:
+                why = f"The macro has {len(lines)} lines; FluidSender queues {MAX_QUEUE} at most"
+            if why:
+                raise MachineError(why, 409)
+            run = {"name": macro["name"], "line": 0, "total": len(lines)}
+            for no, text in enumerate(lines, 1):
+                line = Line(check_line(text), tag="macro", data=run)
+                line.no = no
+                link.queue.append(line)
+            link.macro = run
+            self.emit({"type": "macro", "macro": dict(run)})
+        link.wake()
+        return {"name": macro["name"], "lines": lines}
 
     def pendant_status(self):
         """The numbers for the pendant's display: the work position (in), status (0 idle, 1 hold or paused,
@@ -4052,6 +4164,8 @@ class Machine:
                 link.end_jogs(why)
             if link.connected and link.job_active():    # (nothing more of it can go)
                 link.end_job(self.clock(), "failed", why, message or why)
+            if link.connected and link.macro is not None:
+                link.end_macro(why)
             if link.connected and message:
                 link.set_alarm(None)            # (Undo Zero's records stay: FluidNC keeps the offsets)
                 if link.axes != _no_axes() or link.planner_blocks:

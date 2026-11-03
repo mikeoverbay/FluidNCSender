@@ -12,7 +12,8 @@ export class MachineClient {
   constructor() {
     // Set by the app. Each gets the event object as the server sent it.
     this.onSnapshot = null;   // first event on every stream: connected, port, firmware, status, modal, axes, jog,
-                              // zeroUndo, alarm, program, job, jogSettings, pendant, probe, scan, touch, console[]
+                              // zeroUndo, alarm, program, job, jogSettings, macros, macroRun, pendant, probe, scan,
+                              // touch, console[]
     this.onStatus = null;     // state, wpos, mpos, feed, spindle, flood, mist (true | false | null: not known), …
                               // (at most 5 a second). Stage 5: ov [feed, rapid, spindle] %, ovTarget (the values
                               // being set, or null), programmedF / programmedS (in force), spindleType, and for
@@ -30,6 +31,8 @@ export class MachineClient {
                               // time, zSurface, arcSegmentMm, stats, warnings } or null } or null: the loaded program
     this.onJob = null;        // job: { name, state, total, sent, acked, line, started, elapsed, why, error, leveled } or null
     this.onJogSettings = null; // jog step and speed the server keeps (the pendant changes them too): { step, feed }
+    this.onMacros = null;     // macros: [{ name, code }], the whole list, when it changed (any window)
+    this.onMacro = null;      // macro: { name, line, total } while one runs, null when it ends
     this.onPendant = null;    // pendant: { port, state: 'off' | 'waiting' | 'connected', since, lastKey }
     this.onProbe = null;      // probe: { port, connected, ready, busy, last, connecting, mayBeDown }
     this.onScan = null;       // scan: { running, point, points, settings, result, error, savedTo }
@@ -118,6 +121,8 @@ export class MachineClient {
       else if (ev.type === 'program') this.onProgram?.(ev);
       else if (ev.type === 'job') this.onJob?.(ev);
       else if (ev.type === 'jogsettings') this.onJogSettings?.(jogSettingsOf(ev));
+      else if (ev.type === 'macros') this.onMacros?.(ev);
+      else if (ev.type === 'macro') this.onMacro?.(ev);
       else if (ev.type === 'pendant') this.onPendant?.(ev);
       else if (ev.type === 'probe') this.onProbe?.(ev);
       else if (ev.type === 'scan') this.onScan?.(ev);
@@ -197,6 +202,10 @@ export class MachineClient {
   stop() { return apiJson('/api/machine/stop', {}); }
   /** settings: { step?, feed? }: the jog step (inches) and speed (in/min) every page and the pendant use. */
   setJogSettings(settings) { return apiJson('/api/machine/jogsettings', settings); }
+  /** The whole macro list ([{ name, code }]): the server checks and keeps it. Resolves to { macros } as kept. */
+  setMacros(macros) { return apiJson('/api/machine/macros', { macros }); }
+  /** Runs the macro of that name: its lines in order, through the line queue. */
+  runMacro(name) { return apiJson('/api/machine/macro', { name }); }
 
   pendantPorts() { return apiJson('/api/pendant/ports'); }
   pendantConnect(port, force = false) { return apiJson('/api/pendant/connect', { port, force }); }

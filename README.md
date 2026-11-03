@@ -10,8 +10,8 @@ Chrome app window. It is **inch-first** everywhere.
 
 ## Features
 
-- **Dockable multi-panel layout** (UGS-like): Files, G-code Editor, Visualizer/Toolpath, Machine, Jog,
-  Scan and Console. Drag panels around, float or maximize them (F11), and reset them from **View → Reset Layout**.
+- **Dockable multi-panel layout** (UGS-like): Files, G-code Editor, Visualizer/Toolpath, Machine,
+  Motion control (Jog and Macros), Scan and Console. Drag panels around, float or maximize them (F11), and reset them from **View → Reset Layout**.
 - **Dark, Medium and Light themes** (View → Theme).
 - **G-code editor** synced with the 3D toolpath view. Save keeps the file's CRLF line endings.
 - **Visualizer:** Top / Iso / Front views; **Toolpath**, **Rapids**, **Scan** and **Machine** checkboxes; a Z
@@ -22,8 +22,10 @@ Chrome app window. It is **inch-first** everywhere.
   (amber when not 100 %).
 - **"2nd chance" buttons:** Zero and Go-to buttons need a second click 0.5–3 s after the first.
   Double-clicks and keyboard presses never count, so a bumped button does nothing.
-- **Jog panel:** 3×3 XY pad with diagonals, Z+/Z−, Stop, and steps of 10 / 1 / 0.1 / 0.01 / 0.001 in.
+- **Motion control → Jog:** 3×3 XY pad with diagonals, Z+/Z−, Stop, and steps of 10 / 1 / 0.1 / 0.01 / 0.001 in.
   Click for one step, or hold to jog continuously. A speed slider is capped at FluidNC's own max rate.
+- **Motion control → Macros:** your own G-code buttons (two clicks to run), kept in `settings.json`. Defaults:
+  Park X / Y / Z axis (`G53 G0 X0`, `Y0`, `Z0`: rapids to machine zero, not homing).
 - **Vacuum (M8) and AUX (M7) toggles** for solid-state relays. The program's own M7/M8/M9 set their state.
 - **Job streaming** with character counting (128-byte buffer). Every job starts with `G20 G90`. It pauses on error,
   and **SAFE STOP** holds, waits for Hold:0, then resets.
@@ -87,7 +89,7 @@ switches and overrides work, soft limits are on, and **Run** streams a G-code fi
 |---|---|
 | [Install and set up](docs/01-install.md) | setup.sh, serial permissions, desktop icon, options |
 | [Connect to FluidNC](docs/02-connect.md) | ports, what is sent at connect, disconnecting |
-| [Jog, home and zero](docs/03-jog-and-zero.md) | jog panel, 2nd-chance zeroing, Undo Zero, Go to zero |
+| [Jog, home, zero and macros](docs/03-jog-and-zero.md) | Motion control (jog, macros), 2nd-chance zeroing, Undo Zero, Go to zero |
 | [Run a job](docs/04-run-a-job.md) | open, check, run, hold, stop, overrides, Vac/AUX |
 | [Surface scan and auto-level](docs/05-scan-and-level.md) | probe, scan settings, level, save leveled G-code |
 | [Pendant](docs/06-pendant.md) | Bluetooth pairing, rfcomm, connecting |

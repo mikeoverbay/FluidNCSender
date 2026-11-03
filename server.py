@@ -49,6 +49,9 @@ out; a refused one answers 409 (400 for a bad call) with {"error": reason}:
       the reason, naming the line); {"off": true}: back to the original. Not during a job or a scan
     run {}  -> {"ok": true, "job": {...}}       stop {} (the safe stop) -> {"ok": true, "stopped": "job"}
     jogsettings {"step": 0.1, "feed": 150}    -> {"ok": true, "step": 0.1, "feed": 150}
+    macros {"macros": [{"name", "code"}, ...]} (the whole list; works disconnected) -> {"ok": true, "macros": [...]}
+    macro {"name": "Park Z axis"} (or {"index": 2}): runs its lines in order -> {"ok": true, "name", "lines"}
+      (the snapshot's "macros" and "macroRun" {"name", "line", "total"} or null; events "macros", "macro")
   /api/pendant/...   GET ports; connect {"port", "force"}; disconnect {}
   /api/probe/...     GET ports; connect {"port", "force"}; disconnect {}; home {}
   /api/scan/...      start {"settings": {...}}; stop {}; settings {...} (saves them); save {"path": "a.xyz"}
@@ -96,7 +99,7 @@ MAX_BIG_CALL = 2 * MAX_FILE + 64 * 1024     # a 64 MB file as JSON text (its esc
 MAX_CALL = 64 * 1024
 BIG_CALLS = ("/api/save", "/api/machine/program")
 MACHINE_CALLS = ("connect", "disconnect", "send", "realtime", "jog", "zero", "home", "unlock",
-                 "coolant", "override", "goto", "program", "level", "run", "stop", "jogsettings")
+                 "coolant", "override", "goto", "program", "level", "run", "stop", "jogsettings", "macros", "macro")
 EXTRA_CALLS = {"pendant": ("connect", "disconnect"), "probe": ("connect", "disconnect", "home"),
                "scan": ("start", "stop", "settings", "save"),
                "touch": ("start", "stop", "pause", "resume", "settings", "save")}
@@ -293,6 +296,10 @@ class Handler(SimpleHTTPRequestHandler):
                 out = m.stop()
             elif call == "jogsettings":
                 out = m.set_jog_settings(data.get("step"), data.get("feed"))
+            elif call == "macros":
+                out = m.set_macros(data.get("macros"))
+            elif call == "macro":
+                out = m.run_macro(data.get("name"), data.get("index"))
             else:
                 m.realtime(data.get("cmd"))
         except MachineError as e:

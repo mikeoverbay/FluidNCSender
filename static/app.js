@@ -7,6 +7,7 @@ import { FileBrowser } from './files.js';
 import { MenuBar } from './menu.js';
 import { InfoPanel, MachinePanel, ConsolePanel, runWhy, fmtClock, undoWhen } from './panels.js';
 import { JogPanel } from './jog.js';
+import { MotionPanel, MacroTab } from './macros.js';
 import { TouchTab } from './touch.js';
 import { ScanPanel, scanPoints, scanTotal, scanDone, scanResultGrid, levelName, levelCoverage, levelMismatch } from './scan.js';
 import { MachineClient, firmwareName, jobActive, jogSettingsOf, DEMO_PORT } from './machine.js';
@@ -56,6 +57,9 @@ const machinePanel = new MachinePanel({
   onOverride: body => override(body),
 });
 const jogPanel = new JogPanel(machine, { onStop: () => stopJog(), log: (text, kind) => status(text, kind), onGoto: to => gotoZero(to) });
+// The Motion control panel (its id stays 'jog'): the Jog tab (jogPanel) and the Macros tab (macros.js)
+const macroTab = new MacroTab(machine, { onRun: name => runMacro(name), log: (text, kind) => status(text, kind) });
+const motionPanel = new MotionPanel(jogPanel, macroTab);
 const gcodeArea = () => (state.job && Number.isFinite(state.job.lo[0]) ? { lo: state.job.lo, hi: state.job.hi } : null);
 // The Scan panel's Touch probe tab (the bit as the probe: touch.js), apart from its Auto probe tab
 const touchTab = new TouchTab(machine, {
@@ -85,7 +89,7 @@ const PANELS = {
   info: { title: 'Toolpath', content: info },
   scan: { title: 'Scan', content: scanPanel, onShow: () => scanPanel.shown() },
   machine: { title: 'Machine', content: machinePanel },
-  jog: { title: 'Jog', content: jogPanel },
+  jog: { title: 'Motion control', content: motionPanel },
   console: { title: 'Console', content: konsole, onShow: () => konsole.shown() },
 };
 
@@ -219,7 +223,31 @@ const dock = DV.createDockview($('dock'), {
       dispose() {},          // keep the content for when the panel is opened again
     };
   },
+  createRightHeaderActionComponent: () => headerTabs(),
 });
+
+/** The right end of a group's tab bar: Motion control's Jog | Macros tabs while that panel is the group's shown one
+ *  (else they go back into the panel: see MotionPanel.tabsInto). */
+function headerTabs() {
+  const element = document.createElement('div');
+  element.className = 'dv-mtabs';
+  let subs = [];
+  return {
+    element,
+    init({ api, group }) {
+      const place = () => {
+        if (group.activePanel?.id === 'jog') motionPanel.tabsInto(element);
+        else if (element.contains(motionPanel.tabs)) motionPanel.tabsInto(null);
+      };
+      subs = [api.onDidActivePanelChange(place)];
+      place();
+    },
+    dispose() {
+      for (const s of subs) s.dispose();
+      if (element.contains(motionPanel.tabs)) motionPanel.tabsInto(null);
+    },
+  };
+}
 
 function addPanel(id, extra = {}) {
   const p = PANELS[id];
@@ -287,7 +315,7 @@ function defaultSizes() {
   // Machine on top, the whole Jog panel below it; in a short window the position (DRO) comes first.
   // (Measured once the widths are set: the text wraps by them.)
   size('machine', { height: Math.max(machinePanel.neededHeight() + TAB_BAR, Math.round(r.height * MACHINE_SHARE),
-    r.height - jogPanel.fullHeight() - TAB_BAR) });
+    r.height - motionPanel.fullHeight() - TAB_BAR) });
 }
 
 /** Where a closed panel goes back when it is opened from the View menu. */
@@ -313,7 +341,7 @@ function placeFor(id) {
     if (other) return at(other, 'within');
     if (has('editor')) return at('editor', 'below');
   }
-  if (id === 'jog' && has('machine')) return { ...at('machine', 'below'), initialHeight: jogPanel.fullHeight() + TAB_BAR };
+  if (id === 'jog' && has('machine')) return { ...at('machine', 'below'), initialHeight: motionPanel.fullHeight() + TAB_BAR };
   if (id === 'machine' && has('jog')) return at('jog', 'above');
   if (id === 'console') return { position: { direction: 'below' }, initialHeight: Math.max(BOTTOM_MIN, Math.round(r.height * BOTTOM_SHARE)) };
   if (has('viewer') && id !== 'viewer') {
@@ -978,16 +1006,18 @@ function pendantNote() {
 const mach = {
   link: '', linkMsg: '', connected: false, port: null, firmware: null, status: null, modal: null,
   axes: null, jog: null, zeroUndo: null, alarm: null, program: null, job: null, pendant: null, probe: null, scan: null, prog,
-  autoScan: null, touch: null,       // (the auto probe's scan and the touch scan; scan: the newer of the two, see currentScan)
+  autoScan: null, touch: null, macroRun: null,      // (the auto probe's scan and the touch scan; scan: the newer of the two, see currentScan)
   lev, levelSettings: null,
 };
 const live = () => mach.link === 'up' && mach.connected;
-const NOT_LIVE = { status: null, modal: null, axes: null, jog: null, zeroUndo: null, alarm: null };
+const NOT_LIVE = { status: null, modal: null, axes: null, jog: null, zeroUndo: null, alarm: null, macroRun: null };
 
 function machineChanged() {
   viewer.setPreLeveled(mach.program?.preLeveled);
   machinePanel.update(mach);
   jogPanel.update(mach);
+  macroTab.update(mach);
+  motionPanel.update(mach);
   scanPanel.update(mach);
   const running = jobActive(mach.job);
   konsole.setEnabled(live(), running ? 'A job is running: typed lines are refused until it ends (? ! ~ on their own go at once)' : '');
@@ -1032,6 +1062,8 @@ machine.onSnapshot = s => {
   });
   konsole.replay(s.console || []);
   if (s.jogSettings) jogPanel.serverSettings(jogSettingsOf(s.jogSettings));
+  mach.macroRun = s.macroRun ?? null;
+  macroTab.setMacros(s.macros ?? null);
   mach.autoScan = s.scan ?? null;
   mach.touch = s.touch ?? null;
   scanEvent(currentScan(), true);
@@ -1099,6 +1131,8 @@ machine.onJob = ev => {
   machineChanged();
 };
 machine.onJogSettings = js => jogPanel.serverSettings(js);
+machine.onMacros = ev => macroTab.setMacros(ev.macros);
+machine.onMacro = ev => { mach.macroRun = ev.macro ?? null; machineChanged(); };
 machine.onPendant = ev => { mach.pendant = ev.pendant ?? null; pendantDlg.setState(mach.pendant); machineChanged(); };
 machine.onProbe = ev => { mach.probe = ev.probe ?? null; machineChanged(); };
 machine.onScan = ev => { mach.autoScan = ev.scan ?? null; scanEvent(currentScan(), false); machineChanged(); };
@@ -1327,6 +1361,7 @@ const GOTO_WHAT = { xy: 'Go to XY 0', z: 'Go to Z 0', zero: 'Go to X0 Y0 Z0' };
 
 /** to: 'xy' or 'z' (the work zero). */
 function gotoZero(to) { return machineCall(GOTO_WHAT[to], () => machine.goto(to)); }
+function runMacro(name) { return machineCall(`Macro ${name}`, () => machine.runMacro(name)); }
 
 // The Machine menu's Zero and Go to items ask with a dialog (the panels' buttons ask with a second click)
 function askZero(axes) {
@@ -1657,7 +1692,7 @@ new MenuBar($('menubar'), [
       panelItem('viewer', 'Visualizer'),
       panelItem('editor', 'G-code Editor'),
       panelItem('machine', 'Machine'),
-      panelItem('jog', 'Jog'),
+      panelItem('jog', 'Motion control'),
       panelItem('files', 'Files'),
       panelItem('info', 'Toolpath'),
       panelItem('scan', 'Scan'),

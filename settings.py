@@ -18,6 +18,9 @@ Python standard library only. Keys:
     "level"        the last auto-level's settings (leveling.py): {"zSurface": 0, "arcSegmentMm": 0.1}, the Z
                    surface (in) and the arc segment length (mm); not in the file until a leveling saves them
                    (get("level") is None until then: LEVEL is used)
+    "macros"       the Motion control panel's macros, in order: [{"name": "Park Z axis", "code": "G53 G0 Z0"}]
+                   (code: G-code lines, one per line, run in order by machine.py's run_macro); MACROS until the
+                   user changes them. Each line must be one the console would send (machine.check_line)
 The file is written at once when something changes, atomically (a temporary file, then os.replace), so a
 crash never leaves half a file. A missing, unknown or bad value falls back to its default: a damaged file
 never stops FluidSender (a damaged zero record is left out, the others kept).
@@ -56,8 +59,15 @@ TOUCH_FEED = (0.1, 50.0)                    # in/min: the touch's speed (G38.2's
 LEVEL = {"zSurface": 0.0, "arcSegmentMm": 0.1}  # auto-level: the user's UGS Z surface; 0.1 mm arc pieces (leveling.py)
 Z_SURFACE_MAX = 10.0                        # in
 ARC_MIN, ARC_MAX = 0.01, 2.0                # mm
+# the default macros: each parks one axis at machine zero by a G53 rapid (never a homing cycle, $H)
+MACROS = [{"name": "Park X axis", "code": "G53 G0 X0"},
+          {"name": "Park Y axis", "code": "G53 G0 Y0"},
+          {"name": "Park Z axis", "code": "G53 G0 Z0"}]
+MACRO_NAME = 40                             # characters in a macro's name at most
+MACRO_CODE = 4000                           # characters in a macro's code at most
+MAX_MACROS = 50
 DEFAULTS = {"jog": JOG, "scan": SCAN, "touchScan": TOUCH, "probePort": None, "pendantPort": None,
-            "zeros": []}                    # ("level": see above)
+            "zeros": [], "macros": MACROS}                    # ("level": see above)
 _DEFAULT_FILE = object()
 
 
@@ -220,9 +230,50 @@ def check_level(value):
     return {"zSurface": z + 0.0, "arcSegmentMm": arc}
 
 
+def check_macro(m, i=None):
+    """One macro, {"name", "code"}, checked: the name 1 to 40 characters (spaces around it trimmed), the code 1 to
+    4000 characters, its lines trimmed and the empty ones dropped, each one the console would send
+    (machine.check_line: no realtime characters, not too long...). Returns it with the code as kept."""
+    from machine import MachineError, check_line   # (here: machine.py imports this module)
+    what = f"Macro {i + 1}" if i is not None else "Macro"
+    if not isinstance(m, dict):
+        raise SettingsError(f"{what}: give its name and code")
+    name, code = m.get("name"), m.get("code")
+    if not isinstance(name, str) or not 1 <= len(name.strip()) <= MACRO_NAME:
+        raise SettingsError(f"{what}: a name of 1 to {MACRO_NAME} characters")
+    name = " ".join(name.split())
+    what = f"Macro \"{name}\""
+    if not isinstance(code, str) or len(code) > MACRO_CODE:
+        raise SettingsError(f"{what}: up to {MACRO_CODE} characters of G-code")
+    lines = [line.strip() for line in code.splitlines() if line.strip()]
+    if not lines:
+        raise SettingsError(f"{what}: no G-code in it")
+    for n, line in enumerate(lines, 1):
+        try:
+            check_line(line)
+        except MachineError as e:
+            raise SettingsError(f"{what}, line {n} ({line[:40]}): {e}") from None
+    return {"name": name, "code": "\n".join(lines)}
+
+
+def check_macros(value):
+    """The macro list, checked (check_macro): at most 50, no two with the same name."""
+    if not isinstance(value, list):
+        raise SettingsError("Macros: a list of macros")
+    if len(value) > MAX_MACROS:
+        raise SettingsError(f"Macros: {len(value)} of them; at most {MAX_MACROS}")
+    out = [check_macro(m, i) for i, m in enumerate(value)]
+    seen = set()
+    for m in out:
+        if m["name"].lower() in seen:
+            raise SettingsError(f"Two macros are named \"{m['name']}\": give each its own name")
+        seen.add(m["name"].lower())
+    return out
+
+
 CHECKS = {"jog": check_jog, "scan": check_scan, "touchScan": check_touch, "probePort": check_port,
           "pendantPort": check_port,
-          "zeros": check_zeros, "level": check_level}
+          "zeros": check_zeros, "level": check_level, "macros": check_macros}
 
 
 class Settings:

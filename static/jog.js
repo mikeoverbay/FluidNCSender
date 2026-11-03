@@ -1,4 +1,5 @@
-// The Jog panel: an XY pad with a Z column, the jog speed and five step distances (inches).
+// The Jog panel (the Jog tab of the Motion control panel: macros.js): an XY pad with a Z column, the jog speed and
+// five step distances (inches).
 //
 // A click (let go within HOLD_MS) moves one step, sent when the button is let go. Held longer, the button
 // starts a hold jog: the server streams short pieces only while this page keeps saying "still held"
@@ -406,6 +407,7 @@ export class JogPanel {
     if (!this.enabled) return this.why || 'jogging is off';
     if (document.hidden) return 'the page was hidden';
     if (!p.btn?.isConnected || !this.root.isConnected) return 'the Jog panel was closed';
+    if (this.root.hidden) return 'the Jog tab was hidden';
     if (p.key && !(this.keysOn && this.root.contains(document.activeElement))) return 'the Jog panel lost focus';
     if (p.captured && !p.btn.hasPointerCapture(p.pointerId)) return 'the pointer capture was lost';
     return '';

@@ -123,7 +123,7 @@
     <p class="cmsg" hidden></p>
     <p class="dim">The pendant talks over Bluetooth: Blueman makes its link <b>/dev/rfcomm1</b> (in Blueman: the pendant →
     Serial Port). Nothing is opened until you press Connect. Then FluidSender answers the pendant and sends it the
-    position, the state and the job's progress a few times a second. Its keys jog with the Jog panel's step and speed
+    position, the state and the job's progress a few times a second. Its keys jog with Motion control → Jog's step and speed
     (its step keys change them there too), zero X / Y / Z, go to zero, home, run, pause / resume and stop, like the
     buttons here; the Console shows each key. If the pendant stops answering for a while it shows “waiting”, and goes
     on by itself when it answers again. Switching the pendant off drops Blueman's Bluetooth link: it then shows “off”,
@@ -152,7 +152,7 @@
         go at once (status, feed hold, resume)</td></tr>
       <tr><td>Jog buttons</td><td>Click: one step of the chosen distance (10 … 0.001 in) · Hold: moves until you let
         go · Stop: stops at once</td></tr>
-      <tr><td>Jog keys</td><td>While the Jog panel has focus (click it; it shows “keys on”): ←&nbsp;→&nbsp;X ·
+      <tr><td>Jog keys</td><td>While Motion control → Jog has focus (click it; it shows “keys on”): ←&nbsp;→&nbsp;X ·
         ↑&nbsp;↓&nbsp;Y · PageUp&nbsp;/&nbsp;PageDown&nbsp;Z · a tap is one step, holding moves until you let go · Esc stops</td></tr>
       <tr><td>Two clicks</td><td>Zero (X, Y, Z), Zero All, Undo Zero, Go to XY 0 and Go to Z 0 ask first: the first
         click turns the button amber (“Zero X? click again”; Go to says how far and which way it moves, and if Z goes
@@ -160,10 +160,17 @@
         cancels. A double-click never counts: wait half a second before the second click</td></tr>
       <tr><td>Mouse only</td><td>No key presses the buttons that move the machine, set a zero or switch an output: Run,
         Resume, Home, Go to, Zero, the jog pad, Start Scan, Home Probe, Vacuum and AUX, the overrides (Tab skips them,
-        and clicking them leaves the keys with the Jog panel). Hold, Soft Reset and Stop work from the keyboard too</td></tr>
+        and clicking them leaves the keys with the Jog tab). Hold, Soft Reset and Stop work from the keyboard too</td></tr>
       <tr><td>Position</td><td>Click a work position to type a new one (Enter sets it; Enter on the value as it was
         sends nothing; Esc or clicking elsewhere cancels) · Undo Zero puts the last zero back, and again for the one
         before: the last 5 zeros (from the page or the pendant) are kept, also through a reset, a reconnect or a restart</td></tr>
+      <tr><td>Macros</td><td>Motion control → Macros: your own G-code buttons, kept by FluidSender (every window shows
+        the same ones). The defaults: Park X axis, Park Y axis, Park Z axis (G53 G0 X0, Y0, Z0: a rapid to machine zero
+        on that axis, not a homing cycle). Two clicks run one (mouse only, like Go to); its lines go one after another
+        and show in the Console, and the first error or ALARM stops it (Hold, Stop and Soft Reset do too). Only when
+        connected and Idle with no job or scan. ✎ edits, 🗑 deletes, + New macro writes one (a name and its lines),
+        Restore defaults puts the Park ones back. G53 G0 X0 moves at the height Z is at: with the bit down, park Z
+        first (or write a macro with G53 G0 Z0 as its first line)</td></tr>
       <tr><td>Go to XY 0 / Z 0</td><td>Rapid moves to the work zero. Go to XY 0 first lifts Z to 0.2 in if it is lower</td></tr>
       <tr><td>Vacuum / AUX</td><td>Toggle the vacuum (M8) and the AUX relay (M7), at once, also during a job. They follow
         FluidNC's own M7 / M8 / M9 state (what $G says), so a program's M8 / M7 / M9 shows too, once FluidNC has run it.
@@ -203,7 +210,7 @@
         in columns: Probe | Grid | Scan | Auto-level. Connect the probe, Home Probe, set the area (or Use G-code area),
         Start Scan. The points show in the visualizer as they come; Save Scan… writes the .xyz file. A Stop, an abort,
         or a Home that fails (Home Probe, or the scan's retract) leaves the probe not homed, its tip maybe down: the
-        Scan and Jog panels say so (“Probe may be down”) until it is homed again, also once the probe is disconnected
+        Scan panel and Motion control → Jog say so (“Probe may be down”) until it is homed again, also once the probe is disconnected
         or let go of after the window closed (only a restart of FluidSender's server, after an update or a reboot,
         forgets it). They say so for a probe connected and not homed yet too, and still once the window closed and
         let go of it. Connect the probe if it is not, and Home Probe before moving X or Y: it is a warning only, X and
@@ -229,7 +236,7 @@
       <tr><td>Windows</td><td>A window opened (or reloaded) with no G-code shows the program FluidSender has loaded (during
         a job, the job's), the one the pendant's Run runs. A window whose G-code is not the loaded one (another window
         opened another file) says so in amber under Run; its Run loads its own G-code first</td></tr>
-      <tr><td>Pendant</td><td>Machine → Connect Pendant… (/dev/rfcomm1). Its keys jog with the Jog panel's step and
+      <tr><td>Pendant</td><td>Machine → Connect Pendant… (/dev/rfcomm1). Its keys jog with Motion control → Jog's step and
         speed, zero, go to zero, home, run, pause / resume and stop; the status bar shows “Pendant: connected”. A jog
         key moves 1 in at most (with the 10 in step it moves 1 in), and a held key never gets more than one step ahead
         of the machine. Its Run resumes a paused job (as Resume does), and starts the loaded program when FluidNC is

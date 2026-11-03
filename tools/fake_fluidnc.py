@@ -1176,7 +1176,7 @@ class FakeFluidNC:
         if self.stop is not None:            # a jog cancel: slow down along the path, then forget the rest
             v, a = self.stop
             t = min(dt, v / a)
-            self.travel(v * t - a * t * t / 2)
+            self.go_along(v * t - a * t * t / 2)
             self.stop[0] = v - a * t
             if self.stop[0] > 1e-9 and self.moves:
                 return
@@ -1198,7 +1198,7 @@ class FakeFluidNC:
         if not self.moves:
             self.state = "Idle"
 
-    def travel(self, dist):
+    def go_along(self, dist):
         """Moves dist mm along the queued moves."""
         while self.moves and dist > 0:
             target = self.moves[0][0]

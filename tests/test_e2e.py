@@ -332,6 +332,7 @@ class EndToEnd(unittest.TestCase):
             cls.crit = cls.start_sim("critical", "--inches")
             cls.v394 = cls.start_sim("fw394", "--fw", "3.9.4", "--inches")
             cls.go = cls.start_sim("goto", "--inches")
+            cls.mac = cls.start_sim("macros", "--inches")
             cls.pcnc = cls.start_sim("pendantcnc", "--inches")
             cls.scnc = cls.start_sim("scancnc", "--inches")
             cls.held = cls.start_sim("held", "--inches")      # left holding lines by another program (test_xn)
@@ -486,7 +487,7 @@ class EndToEnd(unittest.TestCase):
         self.assertFalse(data["connected"])               # the server never connects by itself
         self.assertEqual(set(data), {"connected", "port", "firmware", "status", "modal", "console",
                                      "axes", "jog", "zeroUndo", "alarm", "program", "job", "jogSettings",
-                                     "probe", "scan", "touch", "pendant"})
+                                     "macros", "macroRun", "probe", "scan", "touch", "pendant"})
         self.assertEqual((data["program"], data["job"], data["jogSettings"]), (None, None, {"step": 0.1, "feed": 150}))
         self.assertEqual((data["probe"]["connected"], data["scan"]["running"], data["pendant"]["state"]),
                          (False, False, "off"))
@@ -1487,6 +1488,69 @@ class EndToEnd(unittest.TestCase):
                                            "G20 G90 G0 X0 Y0"])
         self.assertEqual([e["text"] for e in ev.find(console("tx"), since=k)], sim.lines(log0))   # shown like typed
 
+    def test_xi2_macros(self):
+        """Motion control -> Macros: the list saved and shown to every page; a macro's lines one after another, as
+        typed ones (Park Z axis takes machine Z to 0); refused when not connected and during a job; Stop drops
+        the lines not sent yet."""
+        sim = self.mac
+        self.assertEqual(self.call("/api/machine/macro", {"name": "Park Z axis"}), (409, {"error": "Not connected"}))
+        ev, snap = self.events()
+        self.assertEqual([m["name"] for m in snap["macros"]], ["Park X axis", "Park Y axis", "Park Z axis"])
+        self.assertIsNone(snap["macroRun"])
+        mine = snap["macros"] + [{"name": "Park all", "code": "G53 G0 Z0\nG53 G0 X0 Y0"},
+                                 {"name": "Slow out", "code": "G20 G90 G1 X2 F20\nG4 P0.1\nG0 X0"}]
+        k = ev.mark()
+        self.assertEqual(self.call("/api/machine/macros", {"macros": mine}), (200, {"ok": True, "macros": mine}))
+        ev.wait(lambda e: e["type"] == "macros" and e["macros"] == mine, since=k, what="the macros event")
+        st, data = self.call("/api/machine/macros", {"macros": [{"name": "a", "code": "G0 X1 ~"}]})
+        self.assertEqual(st, 400)
+        self.assertTrue(data["error"].startswith('Macro "a", line 1 (G0 X1 ~): Line not sent'), data)
+        self.ready(ev, sim)
+        self.send("G0 X1 Y1 Z-0.5")
+        self.wait_idle_at([1, 1, -0.5], 1e-4)
+        log0 = len(sim.entries())
+        k = ev.mark()
+        self.assertEqual(self.press("/api/machine/macro", {"name": "Park Z axis"}),
+                         (200, {"ok": True, "name": "Park Z axis", "lines": ["G53 G0 Z0"]}))
+        ev.wait(console("info", "Macro Park Z axis done"), since=k, timeout=8)
+        st = self.wait_for(lambda: (lambda s: s if s and s["state"] == "Idle" and abs(s["mpos"][2]) < 1e-4 else None)(
+            self.state()["status"]), 8, "machine Z 0")
+        self.assertAlmostEqual(st["wpos"][0], 1, delta=1e-4)        # (X and Y stay)
+        self.assertEqual(self.press("/api/machine/macro", {"name": "Park all"})[0], 200)
+        ev.wait(console("info", "Macro Park all done"), since=k, timeout=15)
+        self.wait_for(lambda: (lambda s: s and s["state"] == "Idle" and all(abs(v) < 1e-4 for v in s["mpos"]))(
+            self.state()["status"]), 8, "machine X Y Z 0")
+        self.assertEqual(sim.lines(log0), ["G53 G0 Z0", "G53 G0 Z0", "G53 G0 X0 Y0"])     # in order
+        self.assertEqual([e["text"] for e in ev.find(console("tx"), since=k)], sim.lines(log0))   # shown like typed
+        self.assertEqual([e["text"] for e in ev.find(console("info", contains="Running macro"), since=k)],
+                         ["Running macro Park Z axis: line 1 of 1", "Running macro Park all: line 1 of 2",
+                          "Running macro Park all: line 2 of 2"])
+
+        # Stop during a macro's first line: its last never goes (FluidNC answers the G4 only once the move is done)
+        self.send("G20 G90 G0 X0 Y0 Z0")
+        self.wait_idle_at([0, 0, 0], 1e-4)
+        log1 = len(sim.entries())
+        k = ev.mark()
+        self.assertEqual(self.press("/api/machine/macro", {"name": "Slow out"})[0], 200)
+        ev.wait(lambda e: e["type"] == "status" and e["state"] == "Run" and (e["wpos"] or [0])[0] > 0.05, since=k,
+                timeout=8, what="moving")
+        self.assertEqual(self.call("/api/machine/stop", {}), (200, {"ok": True, "stopped": "motion"}))
+        ev.wait(console("error", "Macro Slow out stopped: Stopped by the user; 1 line of it not sent"), since=k)
+        ev.wait(lambda e: e["type"] == "macro" and e["macro"] is None, since=k, what="the macro's end")
+        ev.wait(console("info", "*** Controller reset"), since=k, timeout=5)
+        idle = self.wait_idle_at()
+        self.assertGreater(idle["wpos"][0], 0.05)       # stopped part-way, not back at X 0
+        self.assertLess(idle["wpos"][0], 1.9)
+        self.assertNotIn("G0 X0", sim.lines(log1))
+        self.assertIsNone(self.state()["macroRun"])
+
+        # refused during a job
+        self.run_job(ev, "G1 X0 F20\nG1 X1 F20\n", "slow.nc")
+        st, data = self.call("/api/machine/macro", {"name": "Park Z axis"})
+        self.assertEqual((st, data), (409, {"error": JOB_RUNNING}))
+        self.assertEqual(self.call("/api/machine/stop", {}), (200, {"ok": True, "stopped": "job"}))
+        ev.wait(job_state("stopped", "failed", "done"), timeout=15, what="the job's end")
+
     # -------------------------------------------------- stage 4: the pendant
 
     def syncs(self, pend, since):
@@ -2230,6 +2294,9 @@ class EndToEnd(unittest.TestCase):
         with open(os.path.join(self.tmp.name, "settings.json")) as f:
             saved = json.load(f)
         self.assertEqual(len(saved.pop("zeros")), undo["count"] if undo else 0)
+        macros = saved.pop("macros")                    # (kept too: the defaults, and test_xi2's own)
+        self.assertEqual(snap["macros"], macros)
+        self.assertEqual([m["name"] for m in macros][:3], ["Park X axis", "Park Y axis", "Park Z axis"])
         self.assertEqual(saved, {"jog": {"step": 0.01, "feed": 75}, "scan": scan, "pendantPort": self.pendant.path,
                                  "probePort": self.probe.path,
                                  "touchScan": {"minX": 0.0, "minY": 0.0, "maxX": 0.0, "maxY": 0.0, "xPoints": 5,
