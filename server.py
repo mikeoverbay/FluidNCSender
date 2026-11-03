@@ -145,6 +145,12 @@ def load_extras(machine, settings):
 
 
 class Handler(SimpleHTTPRequestHandler):
+    # The page's own file types, fixed here: on Windows Python takes them from the registry, where .js and .css are
+    # often text/plain, and Chrome then refuses to run the scripts and use the stylesheet (an unstyled page)
+    extensions_map = {**SimpleHTTPRequestHandler.extensions_map,
+                      ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
+                      ".html": "text/html", ".json": "application/json", ".svg": "image/svg+xml",
+                      ".png": "image/png", ".ico": "image/x-icon", ".map": "application/json"}
     start_dir = DEFAULT_DIR
     allowed_hosts = ()
     machine = None      # the FluidNC connection (machine.Machine), shared by every page

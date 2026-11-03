@@ -277,17 +277,17 @@ button.danger:hover { background: #c83a33; }
 .axis > span { color: var(--accent); font-weight: 700; font-size: 22.5px; width: 16px; }
 .axis div { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-end; }
 /* 26px, smaller in a narrow panel so all four decimals of a value like -123.4567 always fit (next to the Zero button) */
-.axis b { font: 600 clamp(10px, calc(18cqw - 17.5px), 26px)/1.05 ui-monospace, 'DejaVu Sans Mono', monospace; color: var(--text); white-space: nowrap; }
+.axis b { font: 600 clamp(10px, calc(18cqw - 17.5px), 26px)/1.05 ui-monospace, 'DejaVu Sans Mono', Consolas, monospace; color: var(--text); white-space: nowrap; }
 .axis b.zedit { cursor: text; }
 .axis b.zedit:hover { text-decoration: underline dotted var(--dim); text-underline-offset: 4px; }
-.axis .zin { width: 100%; min-width: 0; text-align: right; padding: 0 4px; font: 600 18px/1.4 ui-monospace, 'DejaVu Sans Mono', monospace; }
+.axis .zin { width: 100%; min-width: 0; text-align: right; padding: 0 4px; font: 600 18px/1.4 ui-monospace, 'DejaVu Sans Mono', Consolas, monospace; }
 .axis .zin.bad { border-color: var(--bad); }
 .axis > button { flex: none; }
 button.zsmall { padding: 1px 6px; font: 500 11px/1.3 system-ui, 'Segoe UI', sans-serif; letter-spacing: 0; text-transform: none; }
 .drohead > button { align-self: center; }
 .zundo { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: -4px 0 8px; font-size: 13.75px; color: var(--dim); }
 .zundo span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.axis small { min-height: 14px; font: 11px/1.25 ui-monospace, 'DejaVu Sans Mono', monospace; color: var(--dim); white-space: nowrap; }
+.axis small { min-height: 14px; font: 11px/1.25 ui-monospace, 'DejaVu Sans Mono', Consolas, monospace; color: var(--dim); white-space: nowrap; }
 .axis small i { font-style: normal; }
 @container (max-width: 190px) {       /* narrow: tighter boxes, and just the number under it */
   .axis { padding: 3px 6px; gap: 6px; }
@@ -311,7 +311,7 @@ button.warnb:hover { background: var(--warnb-hover); }
 .note.bad { color: var(--bad); }
 .console { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
 .clog {
-  flex: 1; overflow-y: auto; padding: 4px 8px; font: 12px/1.45 ui-monospace, 'DejaVu Sans Mono', monospace; white-space: pre-wrap;
+  flex: 1; overflow-y: auto; padding: 4px 8px; font: 12px/1.45 ui-monospace, 'DejaVu Sans Mono', Consolas, monospace; white-space: pre-wrap;
   overflow-anchor: none;     /* while following; ConsolePanel.follow() turns anchoring on while the user reads */
 }
 .cline.k-err { color: var(--bad); }
@@ -393,7 +393,7 @@ button.warnb:hover { background: var(--warnb-hover); }
 /* ---------------------------------------------------------------- editor (CodeMirror theme "fluid") */
 .editor { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
 .editor .CodeMirror { height: 100%; min-height: 0; min-width: 0; grid-row: 2; }
-.cm-s-fluid.CodeMirror { background: var(--bg); color: var(--text); font: 16.25px/1.45 ui-monospace, 'DejaVu Sans Mono', monospace; }
+.cm-s-fluid.CodeMirror { background: var(--bg); color: var(--text); font: 16.25px/1.45 ui-monospace, 'DejaVu Sans Mono', Consolas, monospace; }
 .cm-s-fluid .CodeMirror-gutters { background: var(--cm-gutter); border-right: 1px solid var(--cm-gutter-line); }
 .cm-s-fluid .CodeMirror-scrollbar-filler, .cm-s-fluid .CodeMirror-gutter-filler { background: var(--bg); }
 .cm-s-fluid .CodeMirror-linenumber { color: var(--cm-linenumber); }
