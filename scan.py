@@ -1,3 +1,14 @@
+# FluidSender: the surface scan. Copyright (C) 2025-2026 mikeoverbay (https://github.com/mikeoverbay).
+# Based on Universal G-code Sender's surface scanner (SurfaceScanner) and its .xyz scan files
+# (SaveScannedSurfaceAction, OpenScannedSurfaceAction), Copyright (C) Will Winder and the Universal G-code Sender
+# contributors: https://github.com/winder/Universal-G-Code-Sender (GNU GPL v3.0), as extended in
+# https://github.com/mikeoverbay/Universal-G-Code-Sender. All credit for its design goes to them.
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU General
+# Public License as published by the Free Software Foundation, either version 3 of the License, or (at your
+# option) any later version. It is distributed WITHOUT ANY WARRANTY; see the GNU General Public License (the
+# LICENSE file) for details.
+# SPDX-License-Identifier: GPL-3.0-or-later
 """
 The surface scan, as the user's UGS fork does it (SurfaceScanner.java), with the probe in probe.py.
 
