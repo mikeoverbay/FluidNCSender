@@ -7,6 +7,7 @@ and the HTTP calls and event stream the way the page uses them: the heights matc
 Pause / Resume between points, Stop (the touch tab's, and the machine's) raises Z and never sends anything to the
 auto probe, and the refusals (no area, no check, the input closed, the spindle on, no contact). Also the settings
 (their own, apart from the auto probe's) and the auto probe scan's Stop raising Z (scan.py with a pretend machine).
+And Touch off Z (a touch plate on the stock): the work Z it sets, Undo Zero, its refusals, no contact, Stop.
 
 No real serial port is ever opened: the server runs with FLUIDSENDER_ONLY_EXTRA_PORTS=1. Its settings file and scans
 folder are temporary.
@@ -41,8 +42,19 @@ GRID = {"minX": 0, "maxX": 0.2, "xPoints": 3, "minY": 0, "maxY": 0.1, "yPoints":
 TOP = "Z raised to the top (machine Z -0.04 in)."     # (the simulator's Z travel: -100 .. 0 mm)
 
 
+# Touch off Z: a 0.25 in plate on the stock, whose top is the simulator's boot work Z 0 (machine Z -30 mm); the
+# plate's top is then at machine Z -30 + 6.35 mm
+PLATE = 0.25
+PLATE_TOP = -30 + PLATE * 25.4
+OFF = {"plateThickness": PLATE, "searchDistance": 1, "feed": 20, "liftAfter": 0.25}
+
+
 def touch_phase(*phases):
     return lambda e: e["type"] == "touch" and e["touch"] and e["touch"]["phase"] in phases
+
+
+def off_phase(*phases):
+    return lambda e: e["type"] == "touch" and e["touch"] and e["touch"]["off"]["phase"] in phases
 
 
 class TouchSettings(unittest.TestCase):
@@ -62,6 +74,31 @@ class TouchSettings(unittest.TestCase):
                 touchscan.check_settings(bad)
             self.assertEqual(str(e.exception), why)
         self.assertEqual(touchscan.load_settings({"feed": "x"}), dict(settings.TOUCH))
+
+    def test_touch_off_settings(self):
+        got = touchscan.check_off_settings()
+        self.assertEqual(got, {"plateThickness": 0.0, "searchDistance": 1.0, "feed": 2.0, "liftAfter": 0.25})
+        got = touchscan.check_off_settings({"plateThickness": 0.5}, {"feed": 5, "searchDistance": 2})
+        self.assertEqual(got, {"plateThickness": 0.5, "searchDistance": 2.0, "feed": 5.0, "liftAfter": 0.25})
+        for bad, why in (({"plateThickness": -0.1}, "Plate thickness: a number from 0 to 2 in"),
+                         ({"searchDistance": 3.5}, "Search distance: a number from 0.05 to 3 in"),
+                         ({"feed": 0.2}, "Touch off feed: a number from 0.5 to 20 in/min"),
+                         ({"feed": 25}, "Touch off feed: a number from 0.5 to 20 in/min"),
+                         ({"liftAfter": "x"}, "Lift after: a number from 0 to 2 in"),
+                         ({"depth": 1}, "Unknown touch off setting: depth")):
+            with self.assertRaises(MachineError) as e:
+                touchscan.check_off_settings(bad)
+            self.assertEqual(str(e.exception), why)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "settings.json")
+            s = settings.Settings(path)
+            s.set("touchOff", dict(OFF))
+            self.assertEqual(settings.Settings(path).get("touchOff")["plateThickness"], PLATE)
+            self.assertEqual(s.get("touchScan"), settings.TOUCH)
+        # a zero record from Touch off Z passes settings.json's check (Undo Zero keeps it over restarts)
+        record = {"axes": "Z", "wcs": 1, "wco": [0, 0, -30], "value": 0.25, "t": 1.0, "source": "touch off",
+                  "text": "Z 0.05"}
+        self.assertEqual(settings.check_zeros([record]), [dict(record, wco=[0.0, 0.0, -30.0])])
 
     def test_kept_apart_from_the_auto_probe(self):
         with tempfile.TemporaryDirectory() as d:
@@ -122,9 +159,23 @@ class SpindleDuringTheScan(unittest.TestCase):
         self.assertEqual(m.calls[-2:], ["G20 G90 G38.2 Z-0.1 F20", "stop"])
         self.assertIsNone(m.activity)
 
+    def test_touch_off_too(self):
+        m, logs = FakeMachine(), []
+        t = touchscan.TouchScanner(m, {}, None, lambda k, x: logs.append((k, x)))
+        t.touch_off(OFF)
+        t.thread.join(5)
+        off = t.state()["off"]
+        self.assertEqual((off["phase"], off["z"]), ("failed", None))
+        self.assertEqual(off["error"], "Touch off Z stopped: the spindle came on. FluidNC was stopped (Hold, then Soft "
+                                       "Reset, which turns it off). Z not set.")
+        self.assertEqual(m.calls, ["G20 G90 G38.2 Z-0.5 F20", "stop"])
+        self.assertIsNone(m.activity)
+        self.assertFalse(t.state()["clipWarn"])
 
-class TouchScan(unittest.TestCase):
-    """One server for the class; each test connects to its own simulator."""
+
+class SimServer(unittest.TestCase):
+    """One server for the class (on PORT: the classes run one after the other); each test connects to its own
+    simulator. The tests are TouchScan's and TouchOffZ's."""
 
     @classmethod
     def setUpClass(cls):
@@ -134,6 +185,7 @@ class TouchScan(unittest.TestCase):
             cls.cnc = cls.start_sim("touch", "--inches", f"--surface=-30,{SLOPE[0]},{SLOPE[1]}")
             cls.stops = cls.start_sim("stops", "--inches", f"--surface=-30,{SLOPE[0]},{SLOPE[1]}")
             cls.flat = cls.start_sim("nocontact", "--inches", "--surface=-40")   # (below the touch's depth)
+            cls.plate = cls.start_sim("plate", "--inches", f"--surface={PLATE_TOP}")
             cls.probe = Probe(cls.tmp.name, "--probe-time", "0.05", "--home-time", "0.05")
             cls.server = Server(PORT, [s.path for s in cls.sims] + [cls.probe.path], cls.tmp.name)
         except Exception:
@@ -224,7 +276,9 @@ class TouchScan(unittest.TestCase):
         _, k = ev.wait(console("info", start=f"Touch scan point {n} of "), since=k, timeout=30, what=f"point {n}")
         return k
 
-    # -------------------------------------------------- tests
+
+
+class TouchScan(SimServer):
 
     def test_1_refusals_then_a_whole_scan(self):
         sim = self.cnc
@@ -402,3 +456,130 @@ class AutoProbeStopRaisesZ(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TouchOffZ(SimServer):
+    """Touch off Z (touchscan.TouchScanner.touch_off) on the simulator: the bit down on a 0.25 in plate on the stock."""
+
+    def off(self, data=OFF):
+        return self.call("/api/touch/off", {"settings": data})
+
+    def wait_off(self, ev, k, timeout=40):
+        end, _ = ev.wait(off_phase("done", "failed", "stopped"), since=k, timeout=timeout, what="the touch-off's end")
+        return end["touch"]["off"]
+
+    def wco_z(self):
+        st = self.status()
+        return st["wpos"][2] - st["mpos"][2]        # (work Z - machine Z: the work Z of machine Z 0, in)
+
+    def test_1_refusals_then_z_set_and_undone(self):
+        sim = self.plate
+        ev = self.events()
+        self.ready(ev, sim)
+        # a Z zero of the user's own first, 0.2 in off: Undo Zero must get it back after the touch-off
+        self.ok("/api/machine/zero", {"axes": "Z", "value": 0.1})
+        self.wait_for(lambda: abs(self.status()["wpos"][2] - 0.1) < 1e-4, "Z 0.1")
+        before = self.wco_z()
+        # refusals: no plate thickness (a first run), no probe check, the spindle on
+        self.assertEqual(self.call("/api/touch/off", {}), (400, {"error": touchscan.NO_PLATE}))
+        self.assertEqual(self.off(), (409, {"error": NO_CHECK}))
+        self.clip(sim)
+        self.go("M3 S1000", [0, 0, 0.1])
+        self.wait_for(lambda: (self.status().get("spindle") or 0) > 0, "the spindle on", 5)
+        self.assertEqual(self.off(), (409, {"error": SPINDLE_ON}))
+        self.go("M5", [0, 0, 0.1])
+        self.go("G0 Z0.11", [0, 0, 0.11])
+        self.go("G0 Z0.1", [0, 0, 0.1])
+        self.wait_for(lambda: not self.status().get("spindle"), "the spindle off", 5)
+        self.assertEqual(self.state()["touch"]["off"]["settings"], {**OFF, "plateThickness": 0.0, "searchDistance": 1.0,
+                                                                     "feed": 2.0})   # (nothing saved yet but the defaults)
+        # a G91 left by the user: the touch-off's lines are all G90, and leave G90
+        self.go("G91", [0, 0, 0.1])
+        time.sleep(0.3)                     # (a report after its ok: FluidNC Idle since)
+        log0, k = len(sim.entries()), ev.mark()
+        self.assertEqual(self.off(), (200, {"ok": True, "settings": {k: float(v) for k, v in OFF.items()}}))
+        self.assertEqual(self.call("/api/machine/send", {"line": "G0 X1"}), (409, {"error": "A touch-off is running"}))
+        self.assertEqual(self.off()[1], {"error": "Touch off Z is running"})
+        self.assertEqual(self.call("/api/touch/pause", {}), (409, {"error": "No touch scan is running"}))
+        off = self.wait_off(ev, k)
+        self.assertEqual((off["phase"], off["error"], off["z"]), ("done", None, PLATE), off)
+        self.assertEqual(off["message"], "Touch off Z done: Z 0 is the stock's top; the bit is up at Z 0.5000. Take the "
+                                         "plate away and the clip off the bit. Undo Zero puts the old Z zero back.")
+        self.assertEqual(sim.lines(log0), ["G20 G90 G38.2 Z-0.9 F20", "G10 L20 P0 G20 Z0.25", "G20 G90 G0 Z0.5"])
+        # the plate's top reads +0.25, so the stock's top (machine Z -30 mm) is work Z 0
+        self.wait_for(lambda: abs(self.status()["wpos"][2] - 0.5) < 1e-4, "Z 0.5")
+        self.assertAlmostEqual(self.status()["mpos"][2], (PLATE_TOP / 25.4) + 0.25, delta=1e-4)
+        self.assertAlmostEqual(self.wco_z(), 30 / 25.4, delta=1e-4)
+        st = self.state()
+        self.assertTrue(st["touch"]["clipWarn"])
+        self.assertFalse(st["touch"]["running"])                # (the touch scan's own state is left alone)
+        self.assertEqual(st["zeroUndo"]["source"], "touch off")
+        self.assertEqual(st["zeroUndo"]["axes"], "Z")
+        self.assertIn(self.status()["probeCheck"], ("none", "open"))      # (used up)
+        self.assertEqual(self.off()[1], {"error": NO_CHECK})
+        _, k2 = ev.wait(console("info", start="Set Z to 0.25 in by Touch off Z (the touch plate). Work position "
+                                              "before: Z 0.05 (in). Undo Zero on the page puts it back"), since=k)
+        # G90 is in force afterwards
+        k = ev.mark()
+        self.ok("/api/machine/send", {"line": "$G"})
+        g, _ = ev.wait(console("rx", start="[GC:"), since=k, what="$G")
+        self.assertIn(" G90 ", g["text"])
+        # Undo Zero: the user's own Z zero back
+        time.sleep(0.3)
+        self.ok("/api/machine/zero", {"undo": True})
+        self.wait_for(lambda: abs(self.wco_z() - before) < 1e-4, "the old Z zero back")
+        self.assertEqual(self.state()["zeroUndo"]["source"], "page")
+        # its settings were kept
+        self.assertEqual(self.state()["touch"]["off"]["settings"], {k: float(v) for k, v in OFF.items()})
+        self.ok("/api/touch/offsettings", {"liftAfter": 0.5})
+        self.assertEqual(self.state()["touch"]["off"]["settings"]["liftAfter"], 0.5)
+        self.assertEqual(self.call("/api/touch/offsettings", {"feed": 50}),
+                         (400, {"error": "Touch off feed: a number from 0.5 to 20 in/min"}))
+        self.ok("/api/touch/offsettings", OFF)
+        self.disconnect()
+        self.assertFalse(self.state()["touch"]["clipWarn"])
+
+    def test_2_no_contact_stops_cleanly(self):
+        sim = self.flat
+        ev = self.events()
+        self.ready(ev, sim)
+        self.go("G91", [0, 0, 0.3])
+        time.sleep(0.3)
+        self.clip(sim)
+        log0, k = len(sim.entries()), ev.mark()
+        self.assertEqual(self.off(dict(OFF, searchDistance=0.2))[0], 200)
+        off = self.wait_off(ev, k)
+        self.assertEqual((off["phase"], off["z"]), ("failed", None))
+        self.assertEqual(off["error"], "No contact within 0.2 in: is the plate under the bit and the clip on? Z not "
+                                       "set. FluidNC is in ALARM:5 now: Unlock, then raise Z (or bring the bit closer "
+                                       "to the plate, or make the search distance longer).")
+        self.assertEqual(sim.lines(log0), ["G20 G90 G38.2 Z0.1 F20"])     # (nothing more)
+        self.assertEqual(self.state()["alarm"]["code"], 5)
+        self.wait_for(lambda: self.status().get("state") == "Alarm", "Alarm reported")
+        self.ok("/api/machine/unlock", {})
+        self.wait_for(lambda: self.status().get("state") == "Idle", "Idle")
+        k = ev.mark()
+        self.ok("/api/machine/send", {"line": "$G"})
+        g, _ = ev.wait(console("rx", start="[GC:"), since=k, what="$G")
+        self.assertIn(" G90 ", g["text"])
+        self.assertFalse(self.state()["touch"]["clipWarn"])
+
+    def test_3_stop_mid_probe(self):
+        sim = self.stops
+        ev = self.events()
+        self.ready(ev, sim)
+        zeros = self.state()["zeroUndo"]
+        for how in ("/api/touch/stop", "/api/machine/stop"):
+            self.go("G0 X0 Y0 Z0.3", [0, 0, 0.3])
+            self.clip(sim)
+            log0, k = len(sim.entries()), ev.mark()
+            self.assertEqual(self.off(dict(OFF, feed=1))[0], 200)
+            self.wait_for(lambda: self.status().get("state") == "Run" and self.status()["wpos"][2] < 0.299,
+                          "the bit going down")
+            self.ok(how, {})
+            off = self.wait_off(ev, k)
+            self.assertEqual((off["phase"], off["error"]), ("stopped", f"Touch off Z stopped: Z not set. {TOP}"), how)
+            self.assertEqual(sim.lines(log0)[-1], "G20 G53 G0 Z-0.04")
+            self.assertNotIn("G10", " ".join(sim.lines(log0)))
+            self.assertEqual(self.state()["zeroUndo"], zeros)          # (no zero recorded)
+

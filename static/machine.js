@@ -221,6 +221,9 @@ export class MachineClient {
   touchResume() { return apiJson('/api/touch/resume', {}); }
   touchSettings(settings) { return apiJson('/api/touch/settings', settings); }
   touchSave(path) { return apiJson('/api/touch/save', { path }); }
+  // Touch off Z (a touch plate: touchscan.py touch_off); touchStop() stops it too
+  touchOff(settings) { return apiJson('/api/touch/off', { settings }); }
+  touchOffSettings(settings) { return apiJson('/api/touch/offsettings', settings); }
 }
 
 /** The Demo machine's "port" (machine.py DEMO_PORT): a simulated FluidNC in the server, no real machine. */

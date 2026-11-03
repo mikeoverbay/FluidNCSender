@@ -1212,6 +1212,12 @@ function softReset() {
     machinePanel.noteReset(); machineChanged();
     return machineCall('Stop the scan', () => machine.stop());
   }
+  if (mach.touch?.off?.running) {
+    if (!confirm('Stop Touch off Z?\n\nThe machine stops safely: a Hold first, then a Soft Reset once it has stopped (the position '
+      + 'is kept), then Z goes all the way up.')) return;
+    machinePanel.noteReset(); machineChanged();
+    return machineCall('Stop Touch off Z', () => machine.stop());
+  }
   if (!confirm('Soft reset FluidNC (Ctrl-X)?\n\nIt stops everything at once and drops the lines waiting to be sent. '
     + 'A reset while the machine is moving can lose the position: home again afterwards. '
     + 'When the machine is stopped, the position is kept.')) return;
@@ -1233,7 +1239,7 @@ async function runJob() {
   why = runWhy(mach) || (!programInSync() ? 'the G-code could not be loaded on the server' : '');
   if (why) { status(`Run: ${why}`, 'err'); return; }
   const p = mach.program, skipped = p.total - p.lines, warn = prog.warnings || [];
-  // (a touch scan completed since connecting: its clip may still be on the bit)
+  // (a touch scan or Touch off Z completed since connecting: its clip may still be on the bit)
   const clip = mach.touch?.clipWarn ? '⚠ Remove the probe clip from the bit before running.\n\n' : '';
   if (!confirm(`${clip}Run ${p.name}?\n\n${p.lines.toLocaleString()} lines to send`
     + (skipped > 0 && !lev.active ? ` (${p.total.toLocaleString()} in the file; comments and empty lines are not sent)` : '')

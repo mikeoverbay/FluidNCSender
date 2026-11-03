@@ -81,6 +81,27 @@ mean the same thing with **Z surface 0**. A touch scan stays right even if Z was
 **Before you run:** after a touch scan, Run's question starts with **⚠ Remove the probe clip from the bit before
 running** (until FluidNC is disconnected).
 
+### Touch off Z (touch plate)
+
+Sets work **Z 0 on the stock's top** with a touch plate (the metal "puck" with a lead), in the same tab's
+**Touch off Z** column. Spindle **OFF**.
+
+1. Once: measure the plate's thickness (calipers) and type it in **Plate** (in). It is remembered; until it is set
+   (0) Touch off Z is off. Also there: **Search** (in, 1; up to 3): how far down the bit looks for the plate;
+   **Feed** (in/min, 2); **Lift** (in, 0.25): how far it goes back up afterwards.
+2. Put the plate on the stock **under the bit**, its lead plugged in; the **clip on the bit**. Jog the bit down
+   to a little above the plate (less than the Search distance).
+3. **Probe check**: touch the plate to the bit, then let go (*Probe check passed ✓*), as for a touch scan.
+4. **Touch off Z**: two clicks (the second 0.5 to 3 s after the first; a key never presses it). The bit comes down
+   (`G38.2`, every line `G20 G90`) until it touches the plate; work Z there becomes the plate's thickness
+   (`G10 L20 P0 Z<plate>`), so **Z 0 is the stock's top**; then it lifts by **Lift**.
+5. Take the plate away and the clip off the bit (Run's question reminds you, as after a touch scan).
+
+**Undo Zero** puts the Z zero from before back, like any zero (the Machine panel says *(touch off)*).
+**No contact** within the Search distance ends it at once with nothing set (ALARM:5: **Unlock**, then raise Z, or
+start closer to the plate). **Stop** (the column's, the machine's or the pendant's) stops safely and raises Z all the
+way up. The probe check is used up by each touch-off, as by each scan.
+
 ## Apply the scan (level)
 
 1. Open the job's **original** G-code (not a saved leveled one, see below).

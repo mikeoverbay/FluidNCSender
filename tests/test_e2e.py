@@ -2233,7 +2233,9 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(saved, {"jog": {"step": 0.01, "feed": 75}, "scan": scan, "pendantPort": self.pendant.path,
                                  "probePort": self.probe.path,
                                  "touchScan": {"minX": 0.0, "minY": 0.0, "maxX": 0.0, "maxY": 0.0, "xPoints": 5,
-                                               "yPoints": 5, "clearance": 0.1, "depth": 0.1, "feed": 2.0}})
+                                               "yPoints": 5, "clearance": 0.1, "depth": 0.1, "feed": 2.0},
+                                 "touchOff": {"plateThickness": 0.0, "searchDistance": 1.0, "feed": 2.0,
+                                              "liftAfter": 0.25}})
 
 
 if __name__ == "__main__":

@@ -217,6 +217,12 @@
         clearance. Pause stops after the point it is at, Resume goes on; Stop stops safely and raises Z all the way
         up. No contact at a point ends the scan (ALARM:5: Unlock). The heights are the copper's work Z (Z surface 0).
         After a touch scan Run warns to take the clip off the bit</td></tr>
+      <tr><td>Touch off Z</td><td>The Touch probe tab's own column: work Z 0 on the stock's top with a touch plate.
+        Type the plate's thickness once (Plate; it is off until then). Spindle OFF, the plate on the stock under the
+        bit, the clip on the bit, the bit a little above the plate; the probe check (touch the plate to the bit, let
+        go); then Touch off Z, two clicks. The bit comes down (G38.2) until it touches the plate, Z there becomes the
+        plate's thickness, then it lifts by Lift. Undo Zero puts the old Z zero back. No contact within Search ends it
+        with nothing set (ALARM:5: Unlock); Stop stops safely and raises Z. Run then warns to take the clip off</td></tr>
       <tr><td>Auto-level</td><td>The Scan panel's last column: Level the G-code with the last scan (or a .xyz file), the
         Z surface (0: the G-code's Z 0 is the scanned surface) and the arc segment (arcs become straight pieces this
         long; 0.1 mm). It levels the way UGS does. From then on Run (and the pendant's Run) runs the leveled G-code:

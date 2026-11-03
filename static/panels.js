@@ -110,7 +110,8 @@ const ON_OFF = /^(on.?off|relay)/i;
 export function undoWhen(u) {
   const s = Math.max(0, Date.now() / 1000 - (u.t || 0));
   const ago = !u.t ? '' : s < 60 ? 'just now' : s < 5400 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
-  const parts = [u.source === 'pendant' ? 'from the pendant' : 'from the page', ago].filter(Boolean).join(', ');
+  const from = { pendant: 'from the pendant', 'touch off': 'by Touch off Z' }[u.source] || 'from the page';
+  const parts = [from, ago].filter(Boolean).join(', ');
   return parts + (u.count > 1 ? `; ${u.count - 1} older kept` : '');
 }
 
@@ -639,7 +640,7 @@ export class MachinePanel {
     this.undoOk = !!undo && this.zeroOk && idle;
     this.undoRow.hidden = !undo;
     if (undo) {
-      set(this.undoRow.firstChild, `Before the last zero${undo.source === 'pendant' ? ' (pendant)' : ''}: ${undo.text}`);
+      set(this.undoRow.firstChild, `Before the last zero${{ pendant: ' (pendant)', 'touch off': ' (touch off)' }[undo.source] || ''}: ${undo.text}`);
       this.undo.context(`${key}|${undo.t}|${undo.text}`);
       two(this.undo, this.undoOk, `Undo Zero: put back the work position from before the last zero (${undo.text}; ${undoWhen(undo)})`);
     } else this.undo.setEnabled(false, '');

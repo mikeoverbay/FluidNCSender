@@ -746,7 +746,7 @@ export class ScanPanel {
     const m = this.m, pr = m.probe, sc = m.autoScan, running = !!sc?.running;
     // The tabs (the one whose scan runs says so)
     for (const t of this.tabBtns) {
-      const busy = !!(t.dataset.tab === 'touch' ? m.touch : sc)?.running;
+      const busy = t.dataset.tab === 'touch' ? !!(m.touch?.running || m.touch?.off?.running) : !!sc?.running;
       t.classList.toggle('busy', busy);
     }
     this.touch?.show();

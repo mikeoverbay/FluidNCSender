@@ -119,7 +119,9 @@ BURST_TIME = 1.0      # gives up while busy, when that is every 20th), or for th
 SAFE_Z = 0.2          # in: Go to XY 0 lifts Z to this first when it is lower (the user's UGS safety height)
 MAX_SCAN_XY = 100.0   # in: a scan point further out than this is a mistake
 TOUCH = "touch scan"  # the activity of the touch probe's scan (touchscan.py); the auto probe's (scan.py) is "scan"
-SCANS = ("scan", TOUCH)
+TOUCH_OFF = "touch-off"  # the activity of Touch off Z (touchscan.py: the bit down on a touch plate, then Z set)
+TOUCHES = (TOUCH, TOUCH_OFF)    # the bit as the probe: the probe check, touch_ready and touch_line are theirs
+SCANS = ("scan", TOUCH, TOUCH_OFF)  # (Stop stops them all alike, then raises Z)
 RAISE_GAP = 0.04      # in: a scan's Stop raises Z to FluidNC's Z travel max less this (machine coordinates)
 RAISE_WAIT = 20.0     # s: ... once the stop's hold and reset are over and FluidNC is Idle, within this long
 PROBE_FAILS = (4, 5)  # FluidNC's probe alarms: 4 the probe input closed before the touch, 5 no contact
@@ -1552,7 +1554,7 @@ class Link:
         "verified" for CHECK_KEEP. There is no other way to pass it. A touch scan uses it up (take_probe_check); a
         reset or an alarm clears it (and a new connection starts without). Not during a touch scan: its own
         touches close and open the input too."""
-        if self.machine.activity == TOUCH:
+        if self.machine.activity in TOUCHES:
             return
         closed = "P" in (st.get("pins") or "")
         stage = self.check_stage(now)
@@ -2609,10 +2611,10 @@ class Link:
             before = " ".join(f"{a} {fixed((mpos[i] - wco[i]) / MM)}" for a, i in zip(axes, map("XYZ".index, axes)))
         names = " ".join(axes)
         what = f"Zeroed {names}" if record["value"] == 0 else f"Set {names} to {fixed(record['value'])} in"
-        pendant = record["source"] == "pendant"
-        what += " from the pendant" if pendant else ""
+        source = record["source"]
+        what += {"pendant": " from the pendant", "touch off": " by Touch off Z (the touch plate)"}.get(source, "")
         text = f"{what}. Work position before: {before} (in)" if before else what
-        if pendant:                         # (its zero keys have no second chance of their own: this is it)
+        if source != "page":                # (the pendant's keys and Touch off Z have no second chance: this is it)
             text += ". Undo Zero on the page puts it back"
         self.machine.log("info", text)
         self.machine.keep_zero(dict(record, t=round(time.time(), 3), text=before))
@@ -2823,7 +2825,7 @@ class Machine:
 
     def scan_owner(self):
         """The scanner whose scan has the machine now: the auto probe's (scan.py) or the touch scan, else None."""
-        return {"scan": self.scanner, TOUCH: self.touch}.get(self.activity)
+        return {"scan": self.scanner, TOUCH: self.touch, TOUCH_OFF: self.touch}.get(self.activity)
 
     def last_scan(self):
         """The last scan, for auto-level ("the last scan", leveling.py): the newest scan of this session of either
@@ -3883,7 +3885,7 @@ class Machine:
             now = self.clock()
             st = link.current_status(now) or {}
             wpos = st.get("wpos")
-            if self.activity != TOUCH:
+            if self.activity not in TOUCHES:
                 raise MachineError("No touch scan is running", 409)
             if not (isinstance(wpos, list) and len(wpos) >= 3):
                 raise MachineError("Work position not known yet; try again in a second", 409)
@@ -3915,7 +3917,8 @@ class Machine:
         with self.lock:
             link = self.live()
             now = self.clock()
-            if self.activity != TOUCH:
+            activity = self.activity
+            if activity not in TOUCHES:
                 raise MachineError("No touch scan is running", 409)
             why = "Stopped" if self.activity_stop else None
             why = why or link.state_why(now, ("Idle",)) or link.line_why(True)
@@ -3940,7 +3943,7 @@ class Machine:
                     if line in link.queue:
                         link.queue.remove(line)
                     raise SpindleOn("The spindle came on during the touch scan", 409)
-                why = self.scan_why(link, line, resets, text, TOUCH)
+                why = self.scan_why(link, line, resets, text, activity)
                 if why is None and self.clock() >= end:
                     why = f"FluidNC did not finish {text} within {limit:g} s"
                 if why:
@@ -3962,6 +3965,45 @@ class Machine:
                         raise MachineError("FluidNC's work offset is not known yet", 409)
                     w = (list(wco) + [0.0, 0.0, 0.0])[:3]
                     return dict(zip("xyz", (round((p - o) / MM, 6) for p, o in zip(got["mpos"], w))))
+                self.changed.wait(0.05)
+
+    def touch_zero(self, value, timeout=LINE_TIMEOUT):
+        """Touch off Z's zero (touchscan.py, activity TOUCH_OFF, the bit just stopped on the touch plate): the work Z
+        where it stands becomes value (in), "G10 L20 P0 G20 Z<value>" in the active coordinate system, kept for Undo
+        Zero like the Zero buttons' (source "touch off": its ok makes the record, Link.zeroed, and the position shows
+        it at once, Link.set_work). Waits for that ok; raises MachineError as touch_line does (Stop, an alarm, a
+        reset, an error reply, disconnect, no answer within timeout s). Returns {"line": text}."""
+        value = _number(value)
+        if value is None or abs(value) > MAX_ZERO:
+            raise MachineError(f"Touch off: the work Z must be a number from -{MAX_ZERO:g} to {MAX_ZERO:g} in")
+        with self.lock:
+            link = self.live()
+            now = self.clock()
+            if self.activity != TOUCH_OFF:
+                raise MachineError("No touch-off is running", 409)
+            why = "Stopped" if self.activity_stop else None
+            why = why or link.state_why(now, ("Idle",)) or link.line_why(True)
+            if not why and link.parser.wco is None:
+                why = "Work offset not known yet; try again in a second"
+            if why:
+                raise MachineError(why, 409)
+            text = zero_line("Z", value)
+            record = {"axes": "Z", "value": float(fixed(value)), "wco": (list(link.parser.wco) + [0.0] * 3)[:3],
+                      "wcs": link.active_wcs(), "source": "touch off"}
+            line = Line(text, tag="zero", data=record, work={2: float(fixed(value)) * MM})
+            link.queue.append(line)
+            resets, end = link.resets, now + timeout
+            link.wake()
+            while True:
+                why = self.scan_why(link, line, resets, text, TOUCH_OFF)
+                if why is None and self.clock() >= end:
+                    why = f"FluidNC did not answer {text} within {timeout:g} s"
+                if why:
+                    if line in link.queue:
+                        link.queue.remove(line)
+                    raise MachineError(why, 409)
+                if line.reply == "ok":
+                    return {"line": text}
                 self.changed.wait(0.05)
 
     def scan_raise(self):
