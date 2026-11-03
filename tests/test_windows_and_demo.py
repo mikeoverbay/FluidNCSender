@@ -89,7 +89,7 @@ class DemoInProcess(unittest.TestCase):
         self.m.send("M3 S12000")
         wait_for("the spindle at 12000", lambda: self.status().get("spindle") == 12000)
         self.m.send("M5")
-        self.m.send("G91 G0 X-0.1")             # (FluidNC's FS says 0 once a move ran with M5)
+        self.m.send("G91 G0 X0.1")             # (FluidNC's FS says 0 once a move ran with M5)
         self.m.send("G90")
         wait_for("the spindle at 0", lambda: self.status().get("spindle") == 0)
         self.m.disconnect()
@@ -130,7 +130,7 @@ class DemoThroughServer(unittest.TestCase):
                 self.assertEqual(server.call("/api/machine/send", {"line": "M3 S8000"})[0], 200)
                 wait_for("the spindle on", lambda: state()["status"]["spindle"] == 8000)
                 self.assertEqual(server.call("/api/machine/send", {"line": "M5"})[0], 200)
-                for line in ("G91 G0 X-0.1", "G90"):    # (FluidNC's FS says 0 once a move ran with M5)
+                for line in ("G91 G0 X0.1", "G90"):    # (FluidNC's FS says 0 once a move ran with M5)
                     self.assertEqual(server.call("/api/machine/send", {"line": line})[0], 200)
                 wait_for("the spindle off", lambda: state()["status"]["spindle"] == 0)
                 wait_for("a jog taken", lambda: server.call("/api/machine/jog", {"step": {"x": 0, "y": -0.5, "z": 0},

@@ -310,7 +310,13 @@ class FakeFluidNC:
     def __init__(self, fd, alarm=False, stall_after=None, banner_delay=0.0, log=None, spinup=0.0,
                  inches=False, soft_limits=False, settings=True, flood=True, mist=True, rx_size=RX_SIZE,
                  ov_at_once=False, verbose_errors=True, keep_line=True, fw="4.1.1", readback=True, spindle="pwm",
-                 coolant_delay=0, late_events=False, vfd_sync=0.0, surface=(-30.0, 0.0, 0.0), probe_closed=False):
+                 coolant_delay=0, late_events=False, vfd_sync=0.0, surface=(-30.0, 0.0, 0.0), probe_closed=False,
+                 travel=None, home_plus=None, wco=None):
+        # The machine's travel, [(lo, hi)] per axis in machine mm (what --soft-limits keeps and FluidNC's
+        # max_travel_mm / homing/mpos_mm / homing/positive_direction say), and which end each axis homes to
+        # (True: the + end). Home is machine 0 either way. The defaults: TRAVEL, all toward +.
+        self.travel = [tuple(t) for t in (travel or TRAVEL)]
+        self.home_plus = list(home_plus) if home_plus is not None else [True, True, True]
         self.surface = surface               # probing: machine Z (mm) at the boot work zero X Y, slopes in X and Y
         self.probe_closed = probe_closed     # the probe input always closed (--probe-closed)
         self.probing = None                  # a probe move under way: {"hit": None, then True}
@@ -342,7 +348,7 @@ class FakeFluidNC:
         self.ticks = 0
         self.now = time.monotonic()          # (for the line being executed: see proceed)
         self.buf = bytearray()               # the line coming in
-        self.wco = [-150.0, -100.0, -30.0]   # G54 work zero in machine coordinates, mm
+        self.wco = list(wco) if wco is not None else [-150.0, -100.0, -30.0]   # G54 work zero, machine mm
         self.tlo = 0.0                       # G43.1 tool length offset, mm (adds to the Z work offset; 3.9.4 keeps
                                              # it over a reset, until it reboots; 4.1.1's reset clears it)
         self.g28 = [0.0, 0.0, 0.0]           # G28 position (machine), set by G28.1
@@ -718,8 +724,14 @@ class FakeFluidNC:
         key = text[2:].strip()
         if self.settings and key.lower() in (f"axes/{a}/soft_limits" for a in "xyz"):
             return [f"$/{key}={'true' if self.soft_limits else 'false'}", "ok"]     # (FluidNC prints bools so)
-        if self.settings and key.lower() in (f"axes/{a}/homing/positive_direction" for a in "xyz"):
-            return [f"$/{key}=true", "ok"]
+        travel = {f"axes/{a}/{k}": (i, k) for i, a in enumerate("xyz")
+                  for k in ("max_travel_mm", "homing/mpos_mm", "homing/positive_direction")}
+        if self.settings and key.lower() in travel:   # (from this machine's travel: see __init__)
+            i, k = travel[key.lower()]
+            lo, hi = self.travel[i]
+            if k == "homing/positive_direction":
+                return [f"$/{key}={'true' if self.home_plus[i] else 'false'}", "ok"]
+            return [f"$/{key}={(hi - lo) if k == 'max_travel_mm' else 0.0:.3f}", "ok"]
         if self.settings and key.lower() in ("coolant/flood_pin", "coolant/mist_pin"):
             return [f"$/{key}={self.pin(key.lower()[8:-4])}", "ok"]
         if self.settings and key.lower() == "coolant/delay_ms":
@@ -951,7 +963,7 @@ class FakeFluidNC:
                 if beyond:                   # FluidNC doesn't run the line: once the moves before it are done
                     axis, coordinate, target = beyond    # it answers ok, then ALARM:2
                     if self.v4:              # (Limit.cpp limit_error, log_limit_context)
-                        lo, hi = TRAVEL[axis]
+                        lo, hi = self.travel[axis]
                         self.send(f"[MSG:INFO: Soft limit exceeded on {AXES[axis]} axis: target {coordinate:.3f} mm, "
                                   f"limit [{lo:.3f}, {hi:.3f}] mm]")
                         self.send("[MSG:INFO: Commanded mpos: " + " ".join(f"{a}{v:.3f}" for a, v in zip(AXES, target))
@@ -1051,7 +1063,7 @@ class FakeFluidNC:
     def constrain_jog(self, target):
         """Like FluidNC's Cartesian::constrain_jog: a jog stops at the soft limits instead of failing."""
         target = list(target)
-        for i, (lo, hi) in enumerate(TRAVEL):
+        for i, (lo, hi) in enumerate(self.travel):
             p, t = self.pos[i], target[i]
             if t == p:
                 continue                     # this axis doesn't move
@@ -1065,7 +1077,7 @@ class FakeFluidNC:
         """With --soft-limits, the first (axis, coordinate, target) a move would take outside the travel."""
         if self.soft_limits:
             for target, _, _ in moves:
-                for i, (lo, hi) in enumerate(TRAVEL):
+                for i, (lo, hi) in enumerate(self.travel):
                     if not lo <= target[i] <= hi:
                         return i, target[i], target
         return None

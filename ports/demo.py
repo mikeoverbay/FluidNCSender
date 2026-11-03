@@ -19,7 +19,13 @@ DEMO_PORT = "Demo machine"     # the Demo machine's "port", as the Connect dialo
 DEMO_LABEL = "Demo machine (simulated FluidNC)"
 # the simulator's options: boots in ALARM, unhomed, like a machine with homing (Home it, or Unlock); soft limits on
 # (the travel X 31.5, Y 23.6, Z 3.9 in); a PWM spindle whose speed shows a second after M3
-DEMO_OPTIONS = {"alarm": True, "soft_limits": True, "spinup": 1.0, "spindle": "pwm"}
+MM = 25.4
+# The Demo machine: a 50 x 38 x 4.5 in machine like the user's. X homes to the left end (X 0 to +50), Y to the far
+# end (Y 0 to -38), Z to the top (Z 0 to -4.5); machine 0 is home on every axis. Its work zero sits front left,
+# 10 in from the left, 5 in from the front, 3 in down, with the stock's top there (for the touch probe).
+DEMO_OPTIONS = {"alarm": True, "soft_limits": True, "spinup": 1.0, "spindle": "pwm",
+                "travel": [(0.0, 50 * MM), (-38 * MM, 0.0), (-4.5 * MM, 0.0)], "home_plus": [False, True, True],
+                "wco": [10 * MM, -33 * MM, -3 * MM], "surface": (-3 * MM, 0.0, 0.0)}
 
 
 def describe():
