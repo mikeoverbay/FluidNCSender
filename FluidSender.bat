@@ -4,7 +4,8 @@ rem Chrome or Edge window, as fluidsender.sh does on Linux. Double-click it.
 rem Needs Python 3.12 or newer from python.org ("Add python.exe to PATH" ticked when installing).
 rem The server runs in a minimized window called "FluidSender server": close that window to stop it.
 setlocal
-cd /d "%~dp0"
+rem (pushd, not cd: it also works when this folder is on a network share, by mapping it to a drive letter)
+pushd "%~dp0"
 if "%FLUIDSENDER_PORT%"=="" (set "PORT=8765") else (set "PORT=%FLUIDSENDER_PORT%")
 set "URL=http://localhost:%PORT%/"
 
