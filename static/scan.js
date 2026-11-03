@@ -15,7 +15,12 @@
 // columns that wrap (Probe | Grid | Scan buttons + progress | Auto-level): side by side there, every control
 // shows without scrolling; in a tall narrow panel they stack.
 //
-// Auto-level (the last column): the server levels the loaded G-code with the last complete scan of this
+// Two tabs, completely apart: Auto probe (all of the above) and Touch probe (touch.js: the bit itself as the probe,
+// through FluidNC's probe input, for people without the auto probe). The chosen tab is remembered (store
+// "scan.tab"). Each tab's scan writes the same .xyz; "the last scan" is the newest of either kind (app.js gives this
+// panel m.scan = that one, m.autoScan = the auto probe's state, m.touch = the touch scan's).
+//
+// Auto-level (the last column, outside the tabs): the server levels the loaded G-code with the last complete scan of this
 // session or a .xyz file (as the user's UGS does it, see leveler.py), and from then on the leveled program is
 // what Run (and the pendant's Run) runs, and what the editor and the visualizer show (app.js). Leveling off
 // goes back to the original. Opening or changing the G-code, a new scan, or connecting to another FluidNC
@@ -165,9 +170,9 @@ export class ScanPanel {
    * { lo: [x, y], hi: [x, y] } or null. onStart(settings): starts the scan (the app asks first).
    * onSave(): Save Scan…. Auto-level (app.js does them): onLevel({ scan: 'last' | { path }, zSurface,
    * arcSegmentMm }), onLevelOff(), onSaveLeveled() (Save leveled G-code…), onPickScan() (a .xyz file…: the
-   * app's file dialog, which calls levelFile(path)).
+   * app's file dialog, which calls levelFile(path)). touch: the Touch probe tab (touch.js TouchTab).
    */
-  constructor(machine, { log, area, onStart, onSave, onLevel, onLevelOff, onSaveLeveled, onPickScan } = {}) {
+  constructor(machine, { log, area, onStart, onSave, onLevel, onLevelOff, onSaveLeveled, onPickScan, touch } = {}) {
     this.machine = machine;
     this.log = log;
     this.area = area;
@@ -177,6 +182,7 @@ export class ScanPanel {
     this.onLevelOff = onLevelOff;
     this.onSaveLeveled = onSaveLeveled;
     this.onPickScan = onPickScan;
+    this.touch = touch || null;
     this.m = {};
     this.ports = [];
     this.busy = '';            // a probe call waiting for its answer: 'connect' | 'disconnect' | 'home'
@@ -185,8 +191,12 @@ export class ScanPanel {
     this.root = document.createElement('div');
     this.root.className = 'scan pad';
     const box = (attrs) => `<input ${attrs} type="text" inputmode="decimal" spellcheck="false" autocomplete="off">`;
-    this.root.innerHTML = `<div class="scols">
-      <section class="scol sc-probe">
+    this.root.innerHTML = `<div class="stabs" role="tablist">
+        <button data-tab="auto" role="tab" title="The auto probe (its own Z, on its own USB port)">Auto probe</button>
+        <button data-tab="touch" role="tab" title="The bit itself as the probe, through FluidNC's probe input: one lead on the copper, one on the bit, spindle OFF">Touch probe</button>
+      </div>
+      <div class="scols">
+      <section class="scol sc-probe" data-tab="auto">
         <div class="shead"><span>Probe</span>
           <button data-act="ports" class="sicon" title="Look for serial ports again (opens none)">⟳</button></div>
         <select id="scanPort" data-f="port" aria-label="The probe's serial port"></select>
@@ -199,7 +209,7 @@ export class ScanPanel {
         <div class="spstate dim"></div>
         <div class="sdown amber" hidden></div>
       </section>
-      <section class="scol sc-grid">
+      <section class="scol sc-grid" data-tab="auto">
         <div class="sgrid">
           <span></span><b>Min</b><b>Max</b><b>Points</b>
           <span>X</span>${['minX', 'maxX', 'xPoints'].map(k => box(`data-k="${k}" aria-label="${LABEL[k]}"`)).join('')}
@@ -211,7 +221,7 @@ export class ScanPanel {
         <button data-act="area" title="Min and Max X / Y from the G-code that is open">Use G-code area</button>
         <div class="scheck dim"></div>
       </section>
-      <section class="scol sc-run">
+      <section class="scol sc-run" data-tab="auto">
         <div class="shead"><span>Scan</span></div>
         <button data-act="start" class="primary">Start Scan</button>
         <button data-act="stop">Stop</button>
@@ -240,6 +250,10 @@ export class ScanPanel {
     </div>`;
     const q = s => this.root.querySelector(s);
     this.cols = q('.scols');
+    if (this.touch) this.cols.querySelector('.sc-level').before(...this.touch.sections);     // (its columns: touch.js)
+    this.tabBtns = [...this.root.querySelectorAll('.stabs [data-tab]')];
+    for (const t of this.tabBtns) t.onclick = () => this.setTab(t.dataset.tab);
+    if (!this.touch) this.root.querySelector('.stabs').hidden = true;
     this.portSel = q('[data-f=port]');
     this.pstate = q('.spstate');
     this.downEl = q('.sdown');
@@ -251,7 +265,8 @@ export class ScanPanel {
     this.offWarn = q('.soffwarn');
     this.lInputs = Object.fromEntries([...this.root.querySelectorAll('[data-l]')].map(i => [i.dataset.l, i]));
     this.lmsgEl = q('.lmsg');
-    this.btn = Object.fromEntries([...this.root.querySelectorAll('[data-act]')].map(b => [b.dataset.act, b]));
+    this.btn = Object.fromEntries([...this.root.querySelectorAll('.scols > [data-tab=auto] [data-act], .sc-level [data-act]')]
+      .map(b => [b.dataset.act, b]));
     mouseOnly(this.btn.start);       // (they move the machine, or the probe)
     mouseOnly(this.btn.home);
     this.btn.ports.onclick = () => this.listPorts();
@@ -279,18 +294,35 @@ export class ScanPanel {
     this.levelSettings = { ...LEVEL_DEFAULTS, ...store.get('level.settings', {}) };
     this.showSettings(true);
     this.showLevelSettings(true);
+    this.setTab(this.touch && store.get('scan.tab', 'auto') === 'touch' ? 'touch' : 'auto');
     this.update({});
+  }
+
+  /** Shows the Auto probe ('auto') or Touch probe ('touch') tab; remembered for next time. */
+  setTab(tab) {
+    this.tab = tab === 'touch' && this.touch ? 'touch' : 'auto';
+    store.set('scan.tab', this.tab);
+    for (const c of this.cols.querySelectorAll('[data-tab]')) c.hidden = c.dataset.tab !== this.tab;
+    for (const t of this.tabBtns) {
+      const on = t.dataset.tab === this.tab;
+      t.classList.toggle('on', on);
+      t.setAttribute('aria-selected', String(on));
+    }
+    this.show();
   }
 
   /** The narrowest width (px) that keeps the four columns side by side: their flex bases, the gaps and the
    *  padding (from the style sheet). */
   neededWidth() {
-    const cols = [...this.cols.children];
     if (!this.root.isConnected) return 560;
     const css = getComputedStyle(this.cols), root = getComputedStyle(this.root);
-    const sum = cols.reduce((n, c) => n + (parseFloat(getComputedStyle(c).flexBasis) || c.offsetWidth), 0);
-    return Math.ceil(sum + (parseFloat(css.columnGap) || 0) * (cols.length - 1)
-      + parseFloat(root.paddingLeft) + parseFloat(root.paddingRight) + 2);
+    // (the wider of the two tabs, each with the shared Apply column)
+    return Math.max(...['auto', 'touch'].map(tab => {
+      const cols = [...this.cols.children].filter(c => !c.dataset.tab || c.dataset.tab === tab);
+      const sum = cols.reduce((n, c) => n + (parseFloat(getComputedStyle(c).flexBasis) || c.offsetWidth), 0);
+      return Math.ceil(sum + (parseFloat(css.columnGap) || 0) * (cols.length - 1)
+        + parseFloat(root.paddingLeft) + parseFloat(root.paddingRight) + 2);
+    }));
   }
 
   /** The height (px) its content takes at this width, nothing scrolled (for the default layout). Measured
@@ -306,13 +338,18 @@ export class ScanPanel {
     this.lmsgEl.replaceChildren(line('good', 'Leveled: 55,287 → 57,402 lines · 2 warnings'), line('bad', '5,038 points outside the scan (up to 0.397 in)'));
     this.lmsgEl.hidden = false;
     let h = 0;
-    for (const running of [true, false]) {
-      this.progEl.hidden = bar.hidden = !running;
-      this.msgEl.hidden = running;
-      this.progEl.textContent = 'Scanning: probing point 75 of 75\nlast Z −0.0123';
-      this.msgEl.textContent = 'Last scan: 75 points · height range 0.0123 in · saved to /home/coffee/scans/scan.xyz';
-      h = Math.max(h, this.root.scrollHeight);
+    const tab = this.tab;
+    for (const t of this.touch ? ['auto', 'touch'] : ['auto']) {      // (the taller of the two tabs)
+      for (const c of this.cols.querySelectorAll('[data-tab]')) c.hidden = c.dataset.tab !== t;
+      for (const running of [true, false]) {
+        this.progEl.hidden = bar.hidden = !running;
+        this.msgEl.hidden = running;
+        this.progEl.textContent = 'Scanning: probing point 75 of 75\nlast Z −0.0123';
+        this.msgEl.textContent = 'Last scan: 75 points · height range 0.0123 in · saved to /home/coffee/scans/scan.xyz';
+        h = Math.max(h, this.root.scrollHeight);
+      }
     }
+    for (const c of this.cols.querySelectorAll('[data-tab]')) c.hidden = c.dataset.tab !== tab;
     for (const [e, hidden, nodes] of keep) { e.hidden = hidden; e.replaceChildren(...nodes); }
     style.cssText = old;
     this.lmsgKey = null;            // (redrawn next time)
@@ -677,10 +714,11 @@ export class ScanPanel {
   /** m: the app's machine state (link, connected, status, job, jog, probe, scan...). */
   update(m) {
     this.m = m;
-    const running = !!m.scan?.running;
+    const running = !!m.autoScan?.running;
     if (running && !this.wasRunning) this.msg = null;      // (a new scan: its own messages from now on)
     this.wasRunning = running;
-    const s = m.scan?.settings;
+    this.touch?.update(m);
+    const s = m.autoScan?.settings;
     // The server's settings (saved, or another window's), unless something was typed here just now
     if (s && KEYS.every(k => Number.isFinite(+s[k])) && !(performance.now() - (this.changedAt || -1e9) < 2000)) {
       const next = Object.fromEntries(KEYS.map(k => [k, +s[k]]));
@@ -705,7 +743,13 @@ export class ScanPanel {
 
   show() {
     if (!this.root.isConnected) return;     // (hidden behind another tab: shown() redraws it)
-    const m = this.m, pr = m.probe, sc = m.scan, running = !!sc?.running;
+    const m = this.m, pr = m.probe, sc = m.autoScan, running = !!sc?.running;
+    // The tabs (the one whose scan runs says so)
+    for (const t of this.tabBtns) {
+      const busy = !!(t.dataset.tab === 'touch' ? m.touch : sc)?.running;
+      t.classList.toggle('busy', busy);
+    }
+    this.touch?.show();
     // The probe
     let ps = 'Not connected', pcls = 'dim';
     if (this.busy === 'connect' || pr?.connecting) ps = 'Connecting…';

@@ -114,6 +114,16 @@ BURST_REPORTS = 11    # ... until a report says them (4.1.1: the next one; 3.9.4
 BURST_TIME = 1.0      # gives up while busy, when that is every 20th), or for this long at most (no answer)
 SAFE_Z = 0.2          # in: Go to XY 0 lifts Z to this first when it is lower (the user's UGS safety height)
 MAX_SCAN_XY = 100.0   # in: a scan point further out than this is a mistake
+TOUCH = "touch scan"  # the activity of the touch probe's scan (touchscan.py); the auto probe's (scan.py) is "scan"
+SCANS = ("scan", TOUCH)
+RAISE_GAP = 0.04      # in: a scan's Stop raises Z to FluidNC's Z travel max less this (machine coordinates)
+RAISE_WAIT = 20.0     # s: ... once the stop's hold and reset are over and FluidNC is Idle, within this long
+PROBE_FAILS = (4, 5)  # FluidNC's probe alarms: 4 the probe input closed before the touch, 5 no contact
+CHECK_KEEP = 600.0    # s: a verified probe check (see Link.track_probe) counts for a touch scan this long
+NO_CHECK = ("Probe check first: touch the clip to the bit, then let go. FluidSender must see FluidNC's probe input "
+            "close and open again (since connecting, within 10 minutes, not used for a scan yet).")
+SPINDLE_ON = ("The spindle is on, or FluidNC still reports a speed: no touch scan then. M5 first (after M5 FluidNC "
+              "shows the last speed until something moves: jog a little)")
 MOVE_SETTLE = 0.25    # Stop takes FluidNC as maybe moving until a report this long after the last ok to a line
                       # that can move it (it starts the move just after the ok; the rest is margin): see may_move
 
@@ -254,6 +264,7 @@ GWORD = re.compile(r"G(\d+(?:\.\d+)?)")
 MWORD = re.compile(r"M(\d+)")
 PWORD = re.compile(r"P(\d+\.?\d*|\.\d+)")
 SETTING = re.compile(r"^\$/([\w/]+)=(.*)$")   # "$/axes/x/max_rate_mm_per_min=5000.000"
+PRB = re.compile(r"^\[PRB:([^:\]]+):([01])\]$")  # a probe move's result: "[PRB:-150.000,-100.000,-30.127:1]"
 
 
 class MachineError(Exception):
@@ -262,6 +273,20 @@ class MachineError(Exception):
     def __init__(self, message, status=400):
         super().__init__(message)
         self.status = status
+
+
+class SpindleOn(MachineError):
+    """FluidNC's reports say the spindle turns (or has a speed) during a touch scan."""
+
+
+class ProbeFailed(MachineError):
+    """A touch scan's G38.2 found nothing (code 5: FluidNC's ALARM:5, or a [PRB:...:0]) or its probe input was
+    closed already (code 4: ALARM:4). mpos: where FluidNC says it stopped (machine Z, in), if it said."""
+
+    def __init__(self, message, code, mpos=None):
+        super().__init__(message, 409)
+        self.code = code
+        self.mpos = mpos
 
 
 # ------------------------------------------------------------------ parsing (no state)
@@ -1027,6 +1052,9 @@ class Link:
         self.ov_seen = [None, None, None]   # the values FluidNC last reported (trusted reports) ...
         self.ov_moved_at = [0.0, 0.0, 0.0]  # ... and when each last changed
         self.ov_late = [None, None, None]   # a target FluidSender stopped waiting for (see ov_report)
+        self.prb = None                     # FluidNC's last probe result (see probe_report) ...
+        self.prbs = 0                       # ... and how many have come
+        self.check = {"stage": None, "at": None}    # the probe check the touch scan needs (see track_probe)
 
     # -------------------------------------------------- thread and port
 
@@ -1505,6 +1533,7 @@ class Link:
             "coolantFollows": {"vacuum": "modal" if self.modal_coolant("flood") else "report",
                                "aux": "modal" if self.modal_coolant("mist") else "report"},
             "coolantDelayMs": self.coolant_delay,
+            "probeCheck": self.check_stage(self.machine.clock()),
         }
 
     def emit_status(self, now, force=False):
@@ -1565,6 +1594,7 @@ class Link:
                 if self.parser.ov_told:
                     self.ov_report(now)
                 self.on_report(st, now)
+                self.track_probe(st, now)
                 if self.connected:
                     self.emit_status(now)
                 return
@@ -1593,6 +1623,8 @@ class Link:
             self.got_setting(setting.group(1), setting.group(2))
         elif startup:
             self.startup_line(text)
+        elif text.startswith("[PRB:"):
+            self.probe_report(text, now)
         elif text.startswith("ALARM:"):
             self.alarm_line(text, now)
         elif msg_ends(text, "Reset to continue") or msg_ends(text, "Reboot FluidNC"):
@@ -1621,6 +1653,48 @@ class Link:
                 self.set_modal(gc["units"] or old.get("units"), gc["distance"] or old.get("distance"), gc["gc"])
                 self.gc_reply(gc["gc"], line, now)
         # ALARM:N, [MSG:...] and the rest are only shown; an ALARM doesn't answer the line in flight
+
+    def probe_report(self, text, now):
+        """"[PRB:x,y,z:1]": where a probe move (G38.x) stopped, in machine coordinates (millimeters, or inches with
+        report_inches: 4 decimals, as in the reports), and whether it touched (1) or not (0). FluidNC prints it
+        before the move's ok (and after its ALARM when it found nothing). Kept for the touch scan (see
+        Machine.touch_line), in millimeters like the parser's positions."""
+        found = PRB.match(text)
+        if not found:
+            return
+        try:
+            mpos = _numbers(found.group(1))
+        except ValueError:
+            return
+        if _reported_in_inches(found.group(1)):
+            mpos[:3] = [v * MM for v in mpos[:3]]
+        self.prb = {"mpos": (mpos + [0.0, 0.0, 0.0])[:3], "ok": found.group(2) == "1", "at": now}
+        self.prbs += 1
+
+    def track_probe(self, st, now):
+        """The probe check a touch scan needs (touchscan.py), from the reports alone: FluidNC's probe input (Pn:P)
+        seen open, then closed, then open again (the user touches the clip to the bit and lets go) makes it
+        "verified" for CHECK_KEEP. There is no other way to pass it. A touch scan uses it up (take_probe_check); a
+        reset or an alarm clears it (and a new connection starts without). Not during a touch scan: its own
+        touches close and open the input too."""
+        if self.machine.activity == TOUCH:
+            return
+        closed = "P" in (st.get("pins") or "")
+        stage = self.check_stage(now)
+        if closed and stage in ("open", "verified"):    # (verified, then touched again: it counts once it opens)
+            self.check = {"stage": "closed", "at": now}
+        elif not closed and stage == "none":
+            self.check = {"stage": "open", "at": now}
+        elif not closed and stage == "closed":
+            self.check = {"stage": "verified", "at": now}
+            self.machine.log("info", "Probe check passed: FluidNC saw the probe input close and open again")
+
+    def check_stage(self, now):
+        """The probe check now: "none", "open" (the input seen open), "closed" (then closed) or "verified"."""
+        c = self.check
+        if c["stage"] is None or (c["stage"] == "verified" and now - c["at"] > CHECK_KEEP):
+            return "none"
+        return c["stage"]
 
     def gc_reply(self, gc, line, now):
         """$G's answer: FluidNC's modal state. Its coolant modes are what the vacuum and AUX switches show when that
@@ -2195,6 +2269,7 @@ class Link:
         (FluidNC, 3.9.4 and 4.1.1, may still run one line it had taken during a hold: see stray.)"""
         m = self.machine
         m.log("info", "*** Controller reset")
+        self.check = {"stage": None, "at": None}    # (a reset or an alarm: check the probe again)
         n = sum(1 for line in (*self.queue, self.inflight) if line and not line.quiet)
         if n:
             m.log("info", f"Dropped {n} line{'s' * (n != 1)} FluidNC had not answered")
@@ -2455,6 +2530,7 @@ class Link:
         code = text[6:].strip()
         code = int(code) if code.isdigit() else None
         self.alarm_at = now
+        self.check = {"stage": None, "at": None}    # (check the probe again)
         job = self.job_active()
         halt = self.halt if self.reset_at is None else None
         outputs = (halt is None and self.reset_at is None and code not in RESET_ALARMS
@@ -2809,11 +2885,12 @@ class Machine:
     (the vacuum and AUX switches), goto, load_program, level (auto-level: leveling.py), run, stop (the safe
     stop) and set_jog_settings.
     The pendant uses the same calls (and pause_toggle, jog_settings, pendant_status); the scanner
-    begin_activity, scan_move, end_activity, stop, work_setup and scan_complete. Refused calls raise
+    begin_activity, scan_move, end_activity, stop, work_setup, scan_complete and scan_raise; the touch scan
+    (touchscan.py) the same, with touch_line for its lines. Refused calls raise
     MachineError (409, with the reason) when FluidNC is in the wrong state, a job or scan runs, or lines are
     still waiting."""
 
-    EXTRAS = ("probe", "scan", "pendant")
+    EXTRAS = ("probe", "scan", "touch", "pendant")
 
     def __init__(self, extra_ports=(), only_extra=False, release_after=RELEASE_AFTER, open_only_extra=False,
                  settings=None):
@@ -2827,10 +2904,12 @@ class Machine:
         self.uploads = 0                               # program uploads begun ...
         self.loaded = 0                                # ... and the newest one kept
         self.job = None                                # the last job, also once its connection is gone
-        self.activity = None                           # 'scan' while the scanner uses the machine
+        self.activity = None                           # 'scan' while the scanner uses the machine, 'touch scan'
+                                                       # while the touch scan does (SCANS)
         self.activity_stop = False                     # Stop was pressed during it
         self.local = threading.local()
         self.probe = self.scanner = self.pendant = None     # attached by server.py (probe.py, scan.py, pendant.py)
+        self.touch = None                              # ... and the touch scan (touchscan.py)
         self.extra_seq = 0                             # events of theirs sent, and the last of each:
         self.extra_last = {}                           # {'probe': (number, its state)}
         self.extra = [p for p in extra_ports if p]     # more ports to list (tests: the simulator's pty)
@@ -2861,11 +2940,35 @@ class Machine:
         with self.lock:
             self.changed.notify_all()
 
-    def attach(self, probe=None, scanner=None, pendant=None):
-        """The probe, scanner and pendant (server.py makes them): their state goes into the snapshot, and
-        Stop stops a scan."""
+    def attach(self, probe=None, scanner=None, pendant=None, touch=None):
+        """The probe, scanner, pendant and touch scan (server.py makes them): their state goes into the snapshot,
+        and Stop stops a scan of either kind."""
         with self.lock:
-            self.probe, self.scanner, self.pendant = probe, scanner, pendant
+            self.probe, self.scanner, self.pendant, self.touch = probe, scanner, pendant, touch
+
+    def scan_owner(self):
+        """The scanner whose scan has the machine now: the auto probe's (scan.py) or the touch scan, else None."""
+        return {"scan": self.scanner, TOUCH: self.touch}.get(self.activity)
+
+    def last_scan(self):
+        """The last scan, for auto-level ("the last scan", leveling.py): the newest scan of this session of either
+        kind (the one started last), if it is complete: {"text", "savedTo", "finished"}, else None. (A new scan
+        replaces the last one whatever its kind, as a new auto probe scan always did.) Not with the lock held: the
+        scanners take their own."""
+        newest, started = None, None
+        for s in (self.scanner, self.touch):
+            if s is None:
+                continue
+            try:
+                t = s.state().get("started")
+            except Exception:               # (a broken scanner must not stop leveling with the other)
+                traceback.print_exc()
+                t = None
+            t = t if isinstance(t, (int, float)) and not isinstance(t, bool) else -math.inf     # (never started)
+            if newest is None or t > started:
+                newest, started = s, t
+        get = getattr(newest, "last_scan", None)
+        return get() if get else None
 
     def release_extras(self, now):
         """Lets go of the pendant's and the probe's ports once no FluidSender window has been open for
@@ -2923,7 +3026,7 @@ class Machine:
         """The probe's, scanner's and pendant's state() now, and how many of their events had gone out."""
         with self.lock:
             seq = self.extra_seq
-            objs = {"probe": self.probe, "scan": self.scanner, "pendant": self.pendant}
+            objs = {"probe": self.probe, "scan": self.scanner, "touch": self.touch, "pendant": self.pendant}
         states = {}
         for kind, obj in objs.items():
             if obj is not None:
@@ -3641,22 +3744,24 @@ class Machine:
         return {"job": info}
 
     def stop(self):
-        """Stop (the page's Stop and Soft Reset during a job, the pendant's Stop): a scan stops (the scanner
-        aborts the probe at once) and so does any move it made; a job gets the safe stop (Link.safe_stop); a
+        """Stop (the page's Stop and Soft Reset during a job, the pendant's Stop): a scan of either kind stops (the
+        auto probe's scanner aborts the probe at once; the touch scan never touches the probe) and so does any move
+        it made (its thread then raises Z: scan_raise); a job gets the safe stop (Link.safe_stop); a
         jog the jog cancel; anything else that may move (Link.may_move: also a move whose ok has just come,
         before a report shows it running), or lines waiting, the safe stop too. Returns {"stopped": "scan" |
         "job" | "jog" | "motion" | None (nothing was going on)}."""
         with self.lock:
-            scanning = self.activity == "scan"
+            scanning = self.activity in SCANS
             if scanning:
-                self.activity_stop = True   # (a scan_move waiting raises at once)
+                self.activity_stop = True   # (a scan_move or touch_line waiting raises at once)
                 self.changed.notify_all()
-            scanner = self.scanner
+            scanner = self.scan_owner()
         stopped = "scan" if scanning else None
         if scanning and scanner is not None and not getattr(self.local, "stopping", False):
             self.local.stopping = True      # (in case the scanner's stop() calls this again)
             try:
-                scanner.stop(stop_machine=False)    # (aborts the probe at once; the machine's part is below)
+                scanner.stop(stop_machine=False)    # (the auto probe's aborts the probe at once; the machine's
+                                                    # part is below)
             except Exception as e:
                 traceback.print_exc()
                 self.log("error", f"Could not stop the scan ({e!r})")
@@ -3850,13 +3955,13 @@ class Machine:
                     return {"x": st["wpos"][0], "y": st["wpos"][1], "z": st["wpos"][2]}
                 self.changed.wait(0.05)
 
-    def scan_why(self, link, line, resets, text):
-        """Why a scan move can't go on (lock held), or None."""
+    def scan_why(self, link, line, resets, text, activity="scan"):
+        """Why a scan move (or a touch scan's line: activity TOUCH) can't go on (lock held), or None."""
         if self.link is not link or not link.connected or link.stopping:
             return "Disconnected during the scan"
         if self.activity_stop:
             return "Stopped"
-        if self.activity != "scan":
+        if self.activity != activity:
             return "The scan has ended"
         if link.alarm:
             return f"{explain(link.alarm['text'])} during the scan"
@@ -3865,6 +3970,162 @@ class Machine:
         if line.reply not in (None, "ok"):
             return f"FluidNC answered {explain(line.reply)} to {text}"
         return None
+
+    def touch_ready(self):
+        """The touch scan's checks once it has the machine (activity TOUCH), and its probe check used up: the work
+        position known, the spindle off (no speed, no M3/M4 in FluidNC's reports), the probe input open (no P in
+        Pn:), and a verified probe check (Link.track_probe). Returns the work position [x, y, z] (in); else
+        MachineError (409) with the reason."""
+        with self.lock:
+            link = self.live()
+            now = self.clock()
+            st = link.current_status(now) or {}
+            wpos = st.get("wpos")
+            if self.activity != TOUCH:
+                raise MachineError("No touch scan is running", 409)
+            if not (isinstance(wpos, list) and len(wpos) >= 3):
+                raise MachineError("Work position not known yet; try again in a second", 409)
+            if (st.get("spindle") or 0) > 0 or link.parser.spindle in ("cw", "ccw"):
+                raise MachineError(SPINDLE_ON, 409)
+            if "P" in (st.get("pins") or ""):
+                raise MachineError("The probe input is already closed: check the clip. It goes on the copper (or the "
+                                   "stock), the other lead on the bit, and they must not touch until the bit comes "
+                                   "down on the copper.", 409)
+            if link.check_stage(now) != "verified":
+                raise MachineError(NO_CHECK, 409)
+            link.check = {"stage": None, "at": None}    # (used up: each scan needs its own check)
+            link.emit_status(now, force=True)
+            return list(wpos[:3])
+
+    def touch_line(self, text, timeout=60.0, at=None, probe=False):
+        """The touch scan's lines (touchscan.py: G0 moves and its G38.2 touches, shown in the console): sends text and
+        waits until FluidNC has answered it ok and reports Idle, in a report made after the ok; at: {axis index:
+        work position (in)} it must report there too (within 0.002 in), for a move. Raises MachineError on an
+        alarm, an error reply, a reset, Stop, the scan ending, disconnect, or no answer within timeout seconds.
+        Returns the work position {"x", "y", "z"} (in).
+        probe: text is a probe move (G38.2): returns where it touched instead, FluidNC's [PRB:] report (machine
+        coordinates) less the work offset: {"x", "y", "z"} work inches. FluidNC's probe alarms (ALARM:5, no contact;
+        ALARM:4, the input closed before the move) and a [PRB:...:0] raise ProbeFailed. Only during the touch scan
+        (activity TOUCH); blocks (its own thread). The spindle on in FluidNC's reports meanwhile raises SpindleOn."""
+        limit = _number(timeout)
+        if limit is None or limit <= 0:
+            raise MachineError("Touch scan: the time limit must be a number of seconds above 0")
+        with self.lock:
+            link = self.live()
+            now = self.clock()
+            if self.activity != TOUCH:
+                raise MachineError("No touch scan is running", 409)
+            why = "Stopped" if self.activity_stop else None
+            why = why or link.state_why(now, ("Idle",)) or link.line_why(True)
+            if not why and link.jogging():
+                why = "Jogging: wait until it has stopped"
+            if why:
+                raise MachineError(why, 409)
+            line = Line(text, tag="scan")
+            link.queue.append(line)
+            resets, prbs, end = link.resets, link.prbs, now + limit
+            link.wake()
+            while True:
+                alarm = link.alarm
+                if probe and alarm and alarm.get("code") in PROBE_FAILS and link.alarm_at >= now:
+                    if line in link.queue:
+                        link.queue.remove(line)
+                    got = link.prb if link.prbs != prbs else None
+                    raise ProbeFailed(f"FluidNC: {explain(alarm['text'])}", alarm["code"],
+                                      got and round(got["mpos"][2] / MM, 4))
+                st = link.status
+                if st and ((st["spindle"] or 0) > 0 or link.parser.spindle in ("cw", "ccw")):
+                    if line in link.queue:
+                        link.queue.remove(line)
+                    raise SpindleOn("The spindle came on during the touch scan", 409)
+                why = self.scan_why(link, line, resets, text, TOUCH)
+                if why is None and self.clock() >= end:
+                    why = f"FluidNC did not finish {text} within {limit:g} s"
+                if why:
+                    if line in link.queue:
+                        link.queue.remove(line)
+                    raise MachineError(why, 409)
+                st = link.status
+                if (line.reply == "ok" and st and st["state"] == "Idle" and link.status_at >= line.done_at + SETTLE
+                        and st["wpos"] and all(abs(st["wpos"][i] - v) <= 0.002 for i, v in (at or {}).items())):
+                    link.moved_at = -1e9    # (it stands still: Stop has no move to hold for it)
+                    if not probe:
+                        return {"x": st["wpos"][0], "y": st["wpos"][1], "z": st["wpos"][2]}
+                    got, wco = link.prb if link.prbs != prbs else None, link.parser.wco
+                    if got is None:
+                        raise MachineError(f"FluidNC answered {text} without its probe report ([PRB:...])", 409)
+                    if not got["ok"]:
+                        raise ProbeFailed("FluidNC: probe fail: no contact", 5, round(got["mpos"][2] / MM, 4))
+                    if wco is None:
+                        raise MachineError("FluidNC's work offset is not known yet", 409)
+                    w = (list(wco) + [0.0, 0.0, 0.0])[:3]
+                    return dict(zip("xyz", (round((p - o) / MM, 6) for p, o in zip(got["mpos"], w))))
+                self.changed.wait(0.05)
+
+    def scan_raise(self):
+        """After a scan's Stop (scan.py or touchscan.py, from its own thread while its scan still has the machine,
+        so nothing else can go meanwhile): the head all the way up, "G20 G53 G0 Z<top>", top being FluidNC's Z
+        travel max (machine coordinates, Link.axes_info) less RAISE_GAP. It first waits for the stop's hold and
+        reset to be over and FluidNC to be Idle (RAISE_WAIT at most), then for Z to get there. Never moves in an
+        alarm, nor when the travel isn't known, nor when not connected: then says so. Returns the sentence to add
+        to the scan's message."""
+        with self.lock:
+            start = self.clock()
+            end = start + RAISE_WAIT
+            while True:
+                link = self.link if self.link and self.link.connected and not self.link.stopping else None
+                if link is None:
+                    return "Raise Z by hand: FluidNC is not connected."
+                now = self.clock()
+                if link.alarm:
+                    return (f"Z not raised: FluidNC is in ALARM ({explain(link.alarm['text'])}). Unlock first, then "
+                            "raise Z.")
+                top = (link.axes_info()["z"].get("travel") or [None, None])[1]
+                if top is None:
+                    return ("Raise Z by hand: FluidNC's Z travel is not known (its max_travel_mm could not be read), "
+                            "so FluidSender doesn't know how high is safe.")
+                settled = (now >= start + MOVE_SETTLE and link.halt is None and link.reset_at is None
+                           and (link.after_reset is None or link.reset_clean) and not link.may_move(now)
+                           and not link.state_why(now, ("Idle",)) and not link.line_why(True)
+                           and link.fresh_state(now) == "Idle")
+                if settled:
+                    break
+                if now >= end:
+                    return f"Raise Z by hand: FluidNC was not Idle within {RAISE_WAIT:g} s of the stop."
+                self.changed.wait(0.05)
+            z = round(top - RAISE_GAP, 4)
+            text = f"G20 G53 G0 Z{fixed(z)}"
+            line = Line(text, tag="raise")
+            link.queue.append(line)
+            resets = link.resets
+            rate = link.axes_info()["z"].get("maxRate") or 20.0
+            mpos = (link.status or {}).get("mpos") or [0.0, 0.0, z - 10.0]
+            limit = abs(z - mpos[2]) / rate * 60.0 * 3.0 + 10.0
+            end = self.clock() + limit
+            link.wake()
+            self.log("info", f"Stopped: raising Z to the top (machine Z {fixed(z)} in)")
+            while True:
+                why = None
+                if self.link is not link or not link.connected or link.stopping:
+                    why = "FluidNC was disconnected"
+                elif link.alarm:
+                    why = f"FluidNC is in ALARM ({explain(link.alarm['text'])}). Unlock first, then raise Z"
+                elif link.resets != resets or line.reply == "dropped":
+                    why = "FluidNC was reset (stopped)"
+                elif line.reply not in (None, "ok"):
+                    why = f"FluidNC answered {explain(line.reply)} to {text}"
+                elif self.clock() >= end:
+                    why = f"Z did not get there within {limit:.0f} s"
+                if why:
+                    if line in link.queue:
+                        link.queue.remove(line)
+                    return f"Z not raised: {why}."
+                st = link.status
+                if (line.reply == "ok" and st and st["state"] == "Idle" and link.status_at >= line.done_at + SETTLE
+                        and st["mpos"] and abs(st["mpos"][2] - z) <= 0.002):
+                    link.moved_at = -1e9
+                    return f"Z raised to the top (machine Z {fixed(z)} in)."
+                self.changed.wait(0.05)
 
     def check_port(self, path):
         """The probe's or the pendant's port, if this server may open it (in test mode only the test ports)."""
@@ -3894,14 +4155,22 @@ class Machine:
                 if link.axes != _no_axes() or link.planner_blocks:
                     self.emit({"type": "axes", "axes": _no_axes_info(), "plannerBlocks": None})
                 self.emit({"type": "conn", "connected": False, "port": None, "firmware": None, "message": message})
+            touch = self.touch
+        gone = getattr(touch, "disconnected", None)
+        if gone is not None:                # (the touch scan's remove-the-clip warning ends: not with our lock held)
+            try:
+                gone()
+            except Exception:
+                traceback.print_exc()
 
     def shutdown(self):
         """Stops a scan, lets go of the pendant and probe ports, closes FluidNC's port (after the safe stop when
         a job, a scan or a move is under way: see disconnect), then ends the event streams once they have sent
         what is waiting (up to 1 s)."""
-        if self.activity == "scan" and self.scanner is not None:
+        owner = self.scan_owner()
+        if owner is not None:
             try:                            # (stops it, and waits a little for its thread)
-                getattr(self.scanner, "shutdown", self.scanner.stop)()
+                getattr(owner, "shutdown", owner.stop)()
             except Exception:
                 traceback.print_exc()
         for extra in (self.pendant, self.probe):

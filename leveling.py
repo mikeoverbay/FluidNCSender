@@ -328,9 +328,10 @@ class Leveling:
         return [f"Job started: {job.name}, {lines}"]
 
     def scan_exists(self):
-        """A complete scan exists in this session (the scanner has one). Not with Machine.lock held: the scanner
-        takes its own lock (Machine asks the scanner for its state only without its lock held, too)."""
-        last = getattr(self.m.scanner, "last_scan", None)
+        """A complete scan exists in this session (the last scan, of either kind, is one: Machine.last_scan). Not
+        with Machine.lock held: the scanners take their own lock (Machine asks them for their state only without
+        its lock held, too)."""
+        last = getattr(self.m, "last_scan", None)
         try:
             return bool(last and last())
         except Exception:                   # (a broken scanner must not stop a job)
@@ -406,7 +407,7 @@ class Leveling:
                 raise LevelingError(f"Not leveled again: {twice}, so the scan's heights are in it already and "
                                     "Apply would add them twice. Run it as it is, or open the original G-code to "
                                     "level it with a new scan.")
-            scanner, setup = m.scanner, m.work_setup()
+            scanner, setup = m, m.work_setup()      # (m.last_scan: the newest scan of either kind)
             self.busy = True
         try:                                # (not with the lock held: 55,000 lines take 2 s)
             mesh, name = self.read(source, scanner)

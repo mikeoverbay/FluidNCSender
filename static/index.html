@@ -207,7 +207,16 @@
         or let go of after the window closed (only a restart of FluidSender's server, after an update or a reboot,
         forgets it). They say so for a probe connected and not homed yet too, and still once the window closed and
         let go of it. Connect the probe if it is not, and Home Probe before moving X or Y: it is a warning only, X and
-        Y moves are not refused</td></tr>
+        Y moves are not refused. A scan's Stop also raises Z all the way up once the machine has stopped (not in an
+        ALARM: Unlock first, then raise Z)</td></tr>
+      <tr><td>Touch probe</td><td>The Scan panel's second tab, apart from the auto probe: the bit itself is the probe,
+        through FluidNC's probe input (a blank PCB or any conductive stock). Spindle OFF, one lead clipped on the copper,
+        the other on the bit, no offset. Before every scan the probe check: touch the clip to the bit, then let go
+        (FluidSender must see the input close and open again: “Probe check passed ✓”); Start is off until then, and
+        while the spindle is on. Each point: the bit comes down (G38.2) until it touches, then back up to the
+        clearance. Pause stops after the point it is at, Resume goes on; Stop stops safely and raises Z all the way
+        up. No contact at a point ends the scan (ALARM:5: Unlock). The heights are the copper's work Z (Z surface 0).
+        After a touch scan Run warns to take the clip off the bit</td></tr>
       <tr><td>Auto-level</td><td>The Scan panel's last column: Level the G-code with the last scan (or a .xyz file), the
         Z surface (0: the G-code's Z 0 is the scanned surface) and the arc segment (arcs become straight pieces this
         long; 0.1 mm). It levels the way UGS does. From then on Run (and the pendant's Run) runs the leveled G-code:

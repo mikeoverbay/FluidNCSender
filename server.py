@@ -48,6 +48,7 @@ out; a refused one answers 409 (400 for a bad call) with {"error": reason}:
   /api/pendant/...   GET ports; connect {"port", "force"}; disconnect {}
   /api/probe/...     GET ports; connect {"port", "force"}; disconnect {}; home {}
   /api/scan/...      start {"settings": {...}}; stop {}; settings {...} (saves them); save {"path": "a.xyz"}
+  /api/touch/...     the touch probe scan (touchscan.py): the same, and pause {} / resume {} (between points)
 
 Distances are in inches, speeds in inches per minute. The probe, scan and pendant calls answer
 503 if their module could not be loaded (the rest of FluidSender works without them).
@@ -94,15 +95,16 @@ BIG_CALLS = ("/api/save", "/api/machine/program")
 MACHINE_CALLS = ("connect", "disconnect", "send", "realtime", "jog", "zero", "home", "unlock",
                  "coolant", "override", "goto", "program", "level", "run", "stop", "jogsettings")
 EXTRA_CALLS = {"pendant": ("connect", "disconnect"), "probe": ("connect", "disconnect", "home"),
-               "scan": ("start", "stop", "settings", "save")}
+               "scan": ("start", "stop", "settings", "save"),
+               "touch": ("start", "stop", "pause", "resume", "settings", "save")}
 PING_EVERY = 10.0
 PING = b'{"type":"ping"}\n'
 
 
 def load_extras(machine, settings):
-    """The probe, the scanner and the pendant, from probe.py, scan.py and pendant.py if they are there and
-    load (a missing or broken one only turns its calls off). Imported here, not at the top: the server
-    runs without them."""
+    """The probe, the scanner, the pendant and the touch scan, from probe.py, scan.py, pendant.py and
+    touchscan.py if they are there and load (a missing or broken one only turns its calls off). Imported here,
+    not at the top: the server runs without them."""
     def module(name):
         try:
             return importlib.import_module(name)
@@ -121,7 +123,8 @@ def load_extras(machine, settings):
             return None
 
     probe_mod, scan_mod, pendant_mod = module("probe"), module("scan"), module("pendant")
-    probe = scanner = pendant = None
+    touch_mod = module("touchscan")
+    probe = scanner = pendant = touch = None
     if probe_mod:
         def new_probe():
             try:                        # (in test mode it may open the test ports only)
@@ -134,8 +137,10 @@ def load_extras(machine, settings):
         scanner = make("surface scan", lambda: scan_mod.Scanner(machine, probe, settings, machine.emit, machine.log))
     if pendant_mod:
         pendant = make("pendant", lambda: pendant_mod.PendantLink(machine, settings))
-    machine.attach(probe=probe, scanner=scanner, pendant=pendant)
-    return probe_mod, probe, scanner, pendant
+    if touch_mod:
+        touch = make("touch scan", lambda: touch_mod.TouchScanner(machine, settings, machine.emit, machine.log))
+    machine.attach(probe=probe, scanner=scanner, pendant=pendant, touch=touch)
+    return probe_mod, probe, scanner, pendant, touch
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -146,6 +151,7 @@ class Handler(SimpleHTTPRequestHandler):
     probe_mod = None    # probe.py, and what was made from it and scan.py and pendant.py (None: not available)
     probe = None
     scanner = None
+    touch = None        # the touch probe scan (touchscan.py)
     pendant = None
     # The G-code text of each program a page uploaded (the machine keeps only the lines it sends), for a page
     # opened later: GET /api/machine/program. One upload at a time, so the text kept is the program loaded.
@@ -307,10 +313,12 @@ class Handler(SimpleHTTPRequestHandler):
 
     def extra(self, kind):
         """The pendant, probe or scanner; MachineError 503 if its module isn't there."""
-        obj = {"pendant": self.pendant, "probe": self.probe, "scan": self.scanner}[kind]
+        obj = {"pendant": self.pendant, "probe": self.probe, "scan": self.scanner, "touch": self.touch}[kind]
         if obj is None:
-            name = {"pendant": "The pendant", "probe": "The probe", "scan": "The surface scan"}[kind]
-            raise MachineError(f"{name} is not available in this FluidSender ({kind}.py could not be loaded)", 503)
+            name = {"pendant": "The pendant", "probe": "The probe", "scan": "The surface scan",
+                    "touch": "The touch probe scan"}[kind]
+            module = "touchscan" if kind == "touch" else kind
+            raise MachineError(f"{name} is not available in this FluidSender ({module}.py could not be loaded)", 503)
         return obj
 
     def extra_ports(self, kind):
@@ -349,6 +357,10 @@ class Handler(SimpleHTTPRequestHandler):
                 out = obj.start(data.get("settings"))
             elif call == "stop":
                 out = {"stopped": bool(obj.stop())}
+            elif call == "pause":           # (the touch scan's Pause / Resume, between its points)
+                out = obj.pause()
+            elif call == "resume":
+                out = obj.resume()
             elif call == "settings":
                 out = obj.save_settings(data)
             else:
@@ -494,8 +506,8 @@ def main():
         release_after=float(os.environ.get("FLUIDSENDER_RELEASE_AFTER") or RELEASE_AFTER),
         settings=Handler.settings,
     )
-    Handler.probe_mod, Handler.probe, Handler.scanner, Handler.pendant = load_extras(Handler.machine,
-                                                                                     Handler.settings)
+    (Handler.probe_mod, Handler.probe, Handler.scanner, Handler.pendant,
+     Handler.touch) = load_extras(Handler.machine, Handler.settings)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     url = f"http://localhost:{args.port}"
     print(f"FluidSender: {url}   (Ctrl+C to quit)", flush=True)

@@ -294,6 +294,8 @@ def scan_phase(*phases):
 # the probe's touches for the 3 x 2 scan, in the order probed (column by column, zigzag in Y): it reports
 # each relative to the first
 SURFACE = (0.5, 0.51, 0.49, 0.52, 0.5, 0.47)
+# a scan's Stop: the probe homed, then the CNC's Z all the way up (the simulator's Z travel: -100 .. 0 mm)
+STOPPED_RAISED = "Scan stopped. Probe retracted (homed). Z raised to the top (machine Z -0.04 in)."
 SCAN_3X2 = {"minX": 0, "maxX": 0.2, "minY": 0, "maxY": 0.1, "xPoints": 3, "yPoints": 2, "zRetract": 0.2}
 XYZ_3X2 = ("# minX=0.00000 maxX=0.20000\n# minY=0.00000 maxY=0.10000\n# xSamples=3 ySamples=2\n# units=INCH\n"
            "0.0 0.0 0.0\n0.0 0.1 0.01\n0.1 0.0 0.02\n0.1 0.1 -0.01\n0.2 0.0 0.0\n0.2 0.1 -0.03\n")
@@ -484,7 +486,7 @@ class EndToEnd(unittest.TestCase):
         self.assertFalse(data["connected"])               # the server never connects by itself
         self.assertEqual(set(data), {"connected", "port", "firmware", "status", "modal", "console",
                                      "axes", "jog", "zeroUndo", "alarm", "program", "job", "jogSettings",
-                                     "probe", "scan", "pendant"})
+                                     "probe", "scan", "touch", "pendant"})
         self.assertEqual((data["program"], data["job"], data["jogSettings"]), (None, None, {"step": 0.1, "feed": 150}))
         self.assertEqual((data["probe"]["connected"], data["scan"]["running"], data["pendant"]["state"]),
                          (False, False, "off"))
@@ -1669,10 +1671,10 @@ class EndToEnd(unittest.TestCase):
         self.wait_for(lambda: [e for e in probe.entries(plog0) if e.get("cmd") == "P"], 10, "a touch")
         self.assertEqual(self.call("/api/scan/stop", {}), (200, {"ok": True, "stopped": True}))
         s, _ = ev.wait(scan_phase("stopped", "failed", "done"), since=k, timeout=10, what="the scan stopped")
-        self.assertEqual((s["scan"]["phase"], s["scan"]["error"]),
-                         ("stopped", "Scan stopped. Probe retracted (homed)."))
+        self.assertEqual((s["scan"]["phase"], s["scan"]["error"]), ("stopped", STOPPED_RAISED))
         self.wait_for(lambda: [e for e in probe.entries(plog0) if e.get("abort") == "P"], 3, "the touch stopped")
         self.assertEqual(self.realtime_names(sim, log0), [])     # the CNC stood still: nothing to stop
+        self.assertEqual(sim.lines(log0)[-1], "G20 G53 G0 Z-0.04")   # then, the probe homed, Z all the way up
         self.wait_for(lambda: [e for e in probe.entries(plog0) if e.get("cmd") == "H"], 3, "the probe homed")
         self.assertTrue(self.state()["probe"]["ready"])         # (the Stop homed it: nobody has to remember)
 
@@ -1750,7 +1752,7 @@ class EndToEnd(unittest.TestCase):
         t_stop = time.monotonic()
         s = self.state()
         self.assertEqual((s["scan"]["phase"], s["scan"]["error"]),
-                         ("stopped", "Scan stopped. Probe retracted (homed)."))
+                         ("stopped", STOPPED_RAISED))
         self.wait_for(lambda: [e for e in probe.entries(plog0) if e.get("abort") == "P"], 3, "the touch stopped")
         self.assertEqual({k: s["probe"][k] for k in ("connected", "ready", "mayBeDown")},
                          {"connected": True, "ready": True, "mayBeDown": False})     # (the Stop homed it)
@@ -2229,7 +2231,9 @@ class EndToEnd(unittest.TestCase):
             saved = json.load(f)
         self.assertEqual(len(saved.pop("zeros")), undo["count"] if undo else 0)
         self.assertEqual(saved, {"jog": {"step": 0.01, "feed": 75}, "scan": scan, "pendantPort": self.pendant.path,
-                                 "probePort": self.probe.path})
+                                 "probePort": self.probe.path,
+                                 "touchScan": {"minX": 0.0, "minY": 0.0, "maxX": 0.0, "maxY": 0.0, "xPoints": 5,
+                                               "yPoints": 5, "clearance": 0.1, "depth": 0.1, "feed": 2.0}})
 
 
 if __name__ == "__main__":

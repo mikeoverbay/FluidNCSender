@@ -7,6 +7,9 @@ Python standard library only. Keys:
     "scan"         the surface scan settings (inches): minX, minY, maxX, maxY, xPoints, yPoints, zRetract, and
                    probeOffX / probeOffY, the spindle centerline's offset from the probe (the user's: Y 3; the
                    probe touches at the bit's position minus it)
+    "touchScan"    the touch probe scan's settings (inches; touchscan.py): minX, minY, maxX, maxY, xPoints, yPoints,
+                   clearance (the work Z the bit travels at between points), depth (how far below work Z 0 a touch
+                   searches) and feed (the touch's speed, in/min). Its own: the auto probe's "scan" is another
     "probePort"    the probe's port when it was last connected (or null)
     "pendantPort"  the pendant's port when it was last connected (or null)
     "zeros"        Undo Zero's records, oldest first: the last 5 zeros (page or pendant), each with the work
@@ -45,10 +48,16 @@ ZERO_KEEP = 5                               # zeros Undo Zero can go back throug
 ZERO_SOURCES = ("page", "pendant")          # where a zero came from
 MAX_ZERO = 100.0                            # in: the largest work position a zero sets (as machine.py)
 MAX_WCO = 100000.0                          # mm: a work offset further out than this is damage
+TOUCH = {"minX": 0.0, "minY": 0.0, "maxX": 0.0, "maxY": 0.0, "xPoints": 5, "yPoints": 5, "clearance": 0.1,
+         "depth": 0.1, "feed": 2.0}             # (a first run: no area, as "scan")
+CLEARANCE = (0.02, 2.0)                     # in: the touch scan's travel height above work Z 0
+DEPTH = (0.01, 1.0)                         # in: how far below work Z 0 a touch searches
+TOUCH_FEED = (0.1, 50.0)                    # in/min: the touch's speed (G38.2's F)
 LEVEL = {"zSurface": 0.0, "arcSegmentMm": 0.1}  # auto-level: the user's UGS Z surface; 0.1 mm arc pieces (leveling.py)
 Z_SURFACE_MAX = 10.0                        # in
 ARC_MIN, ARC_MAX = 0.01, 2.0                # mm
-DEFAULTS = {"jog": JOG, "scan": SCAN, "probePort": None, "pendantPort": None, "zeros": []}   # ("level": see above)
+DEFAULTS = {"jog": JOG, "scan": SCAN, "touchScan": TOUCH, "probePort": None, "pendantPort": None,
+            "zeros": []}                    # ("level": see above)
 _DEFAULT_FILE = object()
 
 
@@ -99,37 +108,59 @@ def check_jog(value):
     return {"step": jog_step(value.get("step")), "feed": jog_feed(value.get("feed"))}
 
 
-def check_scan(value):
-    """The scan settings, checked: min <= max on each axis (equal only with 1 point there), 1 to 100 points
-    per axis and at most 2000 in all, Z retract 0.01 to 2 in."""
-    if not isinstance(value, dict):
-        raise SettingsError("Scan settings: give minX, minY, maxX, maxY, xPoints, yPoints and zRetract")
+def check_area(value, what="Scan"):
+    """A scan's grid (either kind): min <= max on each axis (equal only with 1 point there), 1 to 100 points per
+    axis and at most 2000 in all; Min / Max all 0 is a first run's (no area yet). Returns those six."""
     out = {}
     for key in ("minX", "minY", "maxX", "maxY"):
         v = _number(value.get(key))
         if v is None or abs(v) > MAX_COORD:
-            raise SettingsError(f"Scan {key}: a number from -{MAX_COORD:g} to {MAX_COORD:g} in")
+            raise SettingsError(f"{what} {key}: a number from -{MAX_COORD:g} to {MAX_COORD:g} in")
         out[key] = v                        # (as given: the grid is computed from these, as UGS does)
     for key in ("xPoints", "yPoints"):
         v = _number(value.get(key))
         if v is None or v != int(v) or not 1 <= v <= MAX_POINTS:
-            raise SettingsError(f"Scan {key}: a whole number from 1 to {MAX_POINTS}")
+            raise SettingsError(f"{what} {key}: a whole number from 1 to {MAX_POINTS}")
         out[key] = int(v)
-    v = _number(value.get("zRetract"))
-    if v is None or not 0.01 <= v <= 2:
-        raise SettingsError("Scan zRetract: a number from 0.01 to 2 in")
-    out["zRetract"] = v
     unset = all(out[k] == 0 for k in ("minX", "maxX", "minY", "maxY"))     # (a first run: no area yet, scan.py)
     for axis in "XY" if not unset else "":
         lo, hi, n = out[f"min{axis}"], out[f"max{axis}"], out[f"{axis.lower()}Points"]
         if lo > hi or (lo == hi and n > 1):
-            raise SettingsError(f"Scan: min {axis} must be below max {axis} (the same only with 1 point in {axis})")
+            raise SettingsError(f"{what}: min {axis} must be below max {axis} (the same only with 1 point in {axis})")
     if out["xPoints"] * out["yPoints"] > MAX_TOTAL:
-        raise SettingsError(f"Scan: {out['xPoints'] * out['yPoints']} points; at most {MAX_TOTAL}")
+        raise SettingsError(f"{what}: {out['xPoints'] * out['yPoints']} points; at most {MAX_TOTAL}")
+    return out
+
+
+def check_scan(value):
+    """The scan settings, checked: the area (check_area), Z retract 0.01 to 2 in, the probe offset."""
+    if not isinstance(value, dict):
+        raise SettingsError("Scan settings: give minX, minY, maxX, maxY, xPoints, yPoints and zRetract")
+    out = check_area(value)
+    v = _number(value.get("zRetract"))
+    if v is None or not 0.01 <= v <= 2:
+        raise SettingsError("Scan zRetract: a number from 0.01 to 2 in")
+    out["zRetract"] = v
     for key in ("probeOffX", "probeOffY"):          # (0 when missing: files from before the probe offset)
         v = _number(value.get(key, 0.0))
         if v is None or abs(v) > MAX_OFFSET:
             raise SettingsError(f"Scan {key}: a number from -{MAX_OFFSET:g} to {MAX_OFFSET:g} in")
+        out[key] = v
+    return out
+
+
+def check_touch(value):
+    """The touch scan's settings, checked: the area (check_area), clearance 0.02 to 2 in, depth 0.01 to 1 in, feed
+    0.1 to 50 in/min. (No probe offset: the bit itself touches.)"""
+    if not isinstance(value, dict):
+        raise SettingsError("Touch scan settings: give minX, minY, maxX, maxY, xPoints, yPoints, clearance, depth "
+                            "and feed")
+    out = check_area(value, "Touch scan")
+    for key, (lo, hi), unit in (("clearance", CLEARANCE, "in"), ("depth", DEPTH, "in"),
+                                ("feed", TOUCH_FEED, "in/min")):
+        v = _number(value.get(key))
+        if v is None or not lo <= v <= hi:
+            raise SettingsError(f"Touch scan {key}: a number from {lo:g} to {hi:g} {unit}")
         out[key] = v
     return out
 
@@ -189,7 +220,8 @@ def check_level(value):
     return {"zSurface": z + 0.0, "arcSegmentMm": arc}
 
 
-CHECKS = {"jog": check_jog, "scan": check_scan, "probePort": check_port, "pendantPort": check_port,
+CHECKS = {"jog": check_jog, "scan": check_scan, "touchScan": check_touch, "probePort": check_port,
+          "pendantPort": check_port,
           "zeros": check_zeros, "level": check_level}
 
 

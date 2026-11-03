@@ -8,6 +8,7 @@ the machine.
                                   [--no-flood] [--no-mist] [--no-readback] [--coolant-delay MS]
                                   [--spindle pwm|onoff|vfd] [--vfd-sync S] [--rx-buffer N] [--ov-at-once]
                                   [--late-events] [--no-verbose-errors] [--clean-reset]
+                                  [--surface Z[,SX,SY]] [--probe-closed]
 
 The first line it prints is the port to connect to (e.g. /dev/pts/7). To use it from the page:
 
@@ -160,11 +161,24 @@ answers error:20, any other $ or [ command error:3.
     --late-events        override bytes and coolant toggles act after the lines that came in the same read
     --no-verbose-errors  error:N without the "[MSG:ERR: ...]" line after it
     --clean-reset        a reset drops every line (FluidNC runs the one it took during a hold)
+    --surface Z[,SX,SY]  the pretend surface for probing (G38.2): machine Z (mm) at X -150 Y -100, slopes in X, Y
+    --probe-closed       the probe input is always closed (Pn:P; a probe move is ALARM:4)
     --log FILE           append what is received to FILE (the tests read it): "LINE <text>" for each line
                          (as it arrives), "RT <name>" for each realtime byte ("?", "!", "~", "^X",
                          "jog-cancel", "flood-toggle", "mist-toggle", "feed+10", "rapid=50", ...,
                          else "0xNN"), "CTRL ^L", "RX OVERFLOW <n>", "HARD-LIMIT", and "LEFTOVER <text>"
                          when it runs a line kept through a reset
+
+Probing (the touch scan's G38.2; G38.3 too): a probe move goes toward its target at its F (G1's rules: error:22
+without one) and stops where the bit meets a pretend surface, in machine coordinates: --surface Z[,SX,SY], the
+surface's machine Z (mm) at the boot work zero (X -150 Y -100), and its slope in X and Y (mm per mm); by default flat
+at machine Z -30, the boot work Z 0. Then, like FluidNC: "[PRB:x,y,z:1]" (machine coordinates, as MPos: inches with
+--inches) and ok; the move's end without contact: G38.2 is ALARM:5 (Probe Fail Contact; then "[PRB:...:0]" and ok,
+and G-code locked until $X), G38.3 only "[PRB:...:0]" and ok. The probe input closed when the move starts
+(check_mode_start, the user's) is ALARM:4 (Probe Fail Initial) and no move. Status reports say Pn:P while the probe
+input is closed: the bit at or below the surface, or always with --probe-closed (a clip on the bit, say).
+kill -USR2 <pid> closes the probe input (as --probe-closed), and the next one opens it again: the user touching the
+clip to the bit and letting go (the touch scan's probe check).
 
 kill -USR1 <pid> trips a hard limit: everything stops at once, ALARM:1, critical, all axes unhomed.
 Python standard library only. Ctrl+C quits.
@@ -219,7 +233,8 @@ MAX_RATE = [SETTINGS[f"axes/{a}/max_rate_mm_per_min"] for a in "xyz"]      # mm/
 ACCEL = [SETTINGS[f"axes/{a}/acceleration_mm_per_sec2"] for a in "xyz"]    # mm/s^2
 PLANNER = SETTINGS["planner_blocks"] - 1     # moves the planner holds (its ring buffer keeps one block free)
 TRAVEL = [(-800.0, 0.0), (-600.0, 0.0), (-100.0, 0.0)]   # --soft-limits, machine mm
-ALARMS = {1: "Hard Limit", 2: "Soft Limit", 3: "Abort Cycle", 6: "Homing Fail Reset", 14: "Unhomed",
+ALARMS = {1: "Hard Limit", 2: "Soft Limit", 3: "Abort Cycle", 4: "Probe Fail Initial", 5: "Probe Fail Contact",
+          6: "Homing Fail Reset", 14: "Unhomed",
           16: "Expander Reset"}
 ERRORS = {1: "Expected GCodecommand letter", 2: "Bad GCode number format",   # (Error.cpp: verbose_errors)
           3: "Invalid $ statement", 8: "Command requires idle state",
@@ -246,7 +261,8 @@ REALTIME = {0x3F: "?", 0x21: "!", 0x7E: "~", 0x18: "^X", 0x84: "safety-door", 0x
 OVR_STEP = {0x91: 10, 0x92: -10, 0x93: 1, 0x94: -1, 0x9A: 10, 0x9B: -10, 0x9C: 1, 0x9D: -1}
 EVENT_BYTES = frozenset(range(0x90, 0x9E)) | {0xA0, 0xA1}   # the overrides and toggles: events (see event)
 RAPID_OVR = {0x95: 100, 0x96: 50, 0x97: 25, 0x98: 5}
-G_GROUPS = {0: "motion", 1: "motion", 4: "non-modal", 10: "non-modal", 28: "non-modal", 28.1: "non-modal",
+G_GROUPS = {0: "motion", 1: "motion", 38.2: "motion", 38.3: "motion",
+            4: "non-modal", 10: "non-modal", 28: "non-modal", 28.1: "non-modal",
             53: "non-modal", 92: "non-modal", 92.1: "non-modal", 17: "plane", 20: "units", 21: "units",
             43.1: "tool length", 49: "tool length", 54: "coordinates", 90: "distance", 91: "distance",
             94: "feed mode"}
@@ -293,7 +309,10 @@ class FakeFluidNC:
     def __init__(self, fd, alarm=False, stall_after=None, banner_delay=0.0, log=None, spinup=0.0,
                  inches=False, soft_limits=False, settings=True, flood=True, mist=True, rx_size=RX_SIZE,
                  ov_at_once=False, verbose_errors=True, keep_line=True, fw="4.1.1", readback=True, spindle="pwm",
-                 coolant_delay=0, late_events=False, vfd_sync=0.0):
+                 coolant_delay=0, late_events=False, vfd_sync=0.0, surface=(-30.0, 0.0, 0.0), probe_closed=False):
+        self.surface = surface               # probing: machine Z (mm) at the boot work zero X Y, slopes in X and Y
+        self.probe_closed = probe_closed     # the probe input always closed (--probe-closed)
+        self.probing = None                  # a probe move under way: {"hit": None, then True}
         self.fd = fd
         self.late_events = late_events       # override bytes and toggles act after the lines read with them
         self.vfd_sync = vfd_sync             # s the protocol task waits for a VFD at a spindle override change
@@ -336,6 +355,7 @@ class FakeFluidNC:
         """Power-up / Ctrl-X: everything but the position, the work and tool length offsets and the homed
         axes starts over; the spindle and coolant go off (and their modes to M5 M9)."""
         self.state = state
+        self.probing = None                  # (a probe move is over)
         self.critical = False                # a hard or soft limit alarm (status says Alarm): only a reset ends it
         self.fake_hold = False               # a '!' in that alarm: a Hold that never completes (see realtime)
         self.spindle_stop = False            # 0x9E in a hold: the spindle spun down until ~ (or 0x9E again)
@@ -817,7 +837,7 @@ class FakeFluidNC:
                 return self.error(25)        # a word twice: X1 X2
             seen.add(letter)
             if letter == "G":
-                if v in (0, 1):
+                if v in (0, 1, 38.2, 38.3):
                     motion = f"G{v:g}"
                 elif v in (20, 21):
                     units = f"G{v:g}"
@@ -858,7 +878,7 @@ class FakeFluidNC:
         if special == 4 and p is None:
             return self.error(28)            # G4 without P
         new_feed = feed * scale if feed is not None else self.feed
-        if axes and special in (None, 53) and motion == "G1" and not new_feed:
+        if axes and special in (None, 53) and motion in ("G1", "G38.2", "G38.3") and not new_feed:
             return self.error(22)
 
         def block():
@@ -918,6 +938,9 @@ class FakeFluidNC:
             elif special == 53:              # machine coordinates, this line only
                 if axes:
                     moves.append((self.machine(axes, scale), RAPID if motion == "G0" else self.feed, motion == "G0"))
+            elif axes and special is None and motion.startswith("G38") and not self.critical:
+                self.motion = motion
+                return (yield from self.probe_move(self.plan(axes, scale, distance), motion))
             elif axes and special is None:
                 moves.append((self.plan(axes, scale, distance), RAPID if motion == "G0" else self.feed, motion == "G0"))
             self.motion = motion
@@ -957,6 +980,49 @@ class FakeFluidNC:
             return ["ok"]
 
         return block()
+
+    def surface_at(self, x, y):
+        """The pretend surface's machine Z (mm) at machine X Y (--surface)."""
+        z0, sx, sy = self.surface
+        return z0 + sx * (x + 150.0) + sy * (y + 100.0)
+
+    def touching(self):
+        """The probe input is closed: the bit at or below the surface (or --probe-closed)."""
+        return self.probe_closed or self.pos[2] <= self.surface_at(self.pos[0], self.pos[1]) + 1e-6
+
+    def prb(self, ok):
+        k, d = (25.4, 4) if self.inches else (1.0, 3)
+        return f"[PRB:{','.join(f'{v / k:.{d}f}' for v in self.pos)}:{int(ok)}]"
+
+    def probe_move(self, target, motion):
+        """G38.2 / G38.3 (see the top): once the moves before it are done, the probe move at F until the bit touches
+        (tick stops it there), then its [PRB:] report and ok; no contact: ALARM:5 for G38.2."""
+        yield self.synced
+        if self.touching():                  # (check_mode_start: the input must be open when the move starts)
+            self.state = "Alarm"
+            self.alarm_pause = (self.now + ALARM_PAUSE, "Idle", [])
+            return alarm_lines(4) + ["ok"]
+        self.probing = {"hit": None}
+        self.queue_move(target, self.feed)
+        yield lambda t: self.probing is None or self.probing["hit"] or (not self.moves and self.state == "Idle")
+        hit = bool(self.probing and self.probing["hit"])
+        self.probing = None
+        if hit or motion == "G38.3":
+            return [self.prb(hit), "ok"]
+        self.state = "Alarm"                 # (FluidNC: G-code locked until $X)
+        self.alarm_pause = (self.now + ALARM_PAUSE, "Idle", [])
+        return alarm_lines(5) + [self.prb(False), "ok"]
+
+    def contact(self):
+        """A probe move under way reached the surface: it stops there at once (FluidNC's probe ISR)."""
+        if self.probing and self.probing["hit"] is None:
+            surface = self.surface_at(self.pos[0], self.pos[1])
+            if self.pos[2] <= surface:
+                self.pos[2] = surface
+                self.moves.clear()
+                self.target = list(self.pos)
+                self.state = "Idle"
+                self.probing["hit"] = True
 
     def jogging(self, target, rate):
         """A $J= line: its move is planned at once and the line answered once the planner has room for it."""
@@ -1078,6 +1144,7 @@ class FakeFluidNC:
             if self.spindle_cmd == "M5" and self.moves:
                 self.speed_zeroed = True     # (a move with the spindle off: FS says 0 from then)
             self.advance(dt)
+            self.contact()
         if self.dwell is not None and not self.suspended(now) and now >= self.busy_until:
             self.dwell -= dt                 # (FluidNC's dwell counts its milliseconds only while not held)
         if self.start is not None and self.start < self.ticks:   # queued before this tick: the cycle starts
@@ -1152,6 +1219,8 @@ class FakeFluidNC:
         rpm = self.fs_speed(now)
         k, d = (25.4, 4) if self.inches else (1.0, 3)     # report_inches: inches with 4 decimals
         parts = [state, "MPos:" + ",".join(f"{v / k:.{d}f}" for v in self.pos), f"FS:{rate / k:.0f},{rpm}"]
+        if self.touching():
+            parts.append("Pn:P")                 # (the probe input closed)
         busy = self.state in BUSY                # FluidNC's counters (Report.cpp): WCO in every 10th report (30th
         if self.wco_counter > 0:                 # while busy) ...
             self.wco_counter -= 1
@@ -1202,12 +1271,23 @@ def main():
     ap.add_argument("--no-verbose-errors", action="store_true", help="error:N without [MSG:ERR: ...] after it")
     ap.add_argument("--clean-reset", action="store_true",
                     help="a reset drops every line (FluidNC 3.9.4 runs the one it took during a hold)")
+    ap.add_argument("--surface", default="-30", metavar="Z[,SX,SY]",
+                    help="probing: the surface's machine Z (mm) at X -150 Y -100, and its slopes in X and Y")
+    ap.add_argument("--probe-closed", action="store_true", help="the probe input is always closed (Pn:P)")
     ap.add_argument("--log", metavar="FILE", help="append what is received to FILE")
     args = ap.parse_args()
     if args.rx_buffer < 0:
         ap.error("--rx-buffer must be 0 or more")
     if not (math.isfinite(args.vfd_sync) and 0 <= args.vfd_sync <= 3):
         ap.error("--vfd-sync must be 0 to 3 seconds (FluidNC alarms after 3 s without the speed)")
+
+    try:
+        surface = [float(v) for v in args.surface.split(",")]
+        if len(surface) not in (1, 3) or not all(map(math.isfinite, surface)):
+            raise ValueError
+    except ValueError:
+        ap.error("--surface: Z, or Z,SX,SY (numbers)")
+    surface = tuple(surface + [0.0, 0.0])[:3]
 
     master, slave = os.openpty()
     tty.setraw(slave)            # the port side: no echo, no line editing (kept after it is closed)
@@ -1219,8 +1299,10 @@ def main():
                       args.inches, args.soft_limits, not args.no_settings, not args.no_flood, not args.no_mist,
                       args.rx_buffer, args.ov_at_once, not args.no_verbose_errors, not args.clean_reset,
                       fw=args.fw, readback=not args.no_readback, spindle=args.spindle,
-                      coolant_delay=args.coolant_delay, late_events=args.late_events, vfd_sync=args.vfd_sync)
+                      coolant_delay=args.coolant_delay, late_events=args.late_events, vfd_sync=args.vfd_sync,
+                      surface=surface, probe_closed=args.probe_closed)
     signal.signal(signal.SIGUSR1, lambda *_: setattr(sim, "tripped", True))   # handled between ticks
+    signal.signal(signal.SIGUSR2, lambda *_: setattr(sim, "probe_closed", not sim.probe_closed))   # (the clip)
     last = time.monotonic()
     sim.tick(last, 0.0)          # the boot banner goes out before anyone can open the port
     print(path, flush=True)

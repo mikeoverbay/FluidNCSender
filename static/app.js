@@ -7,6 +7,7 @@ import { FileBrowser } from './files.js';
 import { MenuBar } from './menu.js';
 import { InfoPanel, MachinePanel, ConsolePanel, runWhy, fmtClock, undoWhen } from './panels.js';
 import { JogPanel } from './jog.js';
+import { TouchTab } from './touch.js';
 import { ScanPanel, scanPoints, scanTotal, scanDone, scanResultGrid, levelName, levelCoverage, levelMismatch } from './scan.js';
 import { MachineClient, firmwareName, jobActive, jogSettingsOf } from './machine.js';
 import { ConnectDialog } from './connect.js';
@@ -55,11 +56,21 @@ const machinePanel = new MachinePanel({
   onOverride: body => override(body),
 });
 const jogPanel = new JogPanel(machine, { onStop: () => stopJog(), log: (text, kind) => status(text, kind), onGoto: to => gotoZero(to) });
+const gcodeArea = () => (state.job && Number.isFinite(state.job.lo[0]) ? { lo: state.job.lo, hi: state.job.hi } : null);
+// The Scan panel's Touch probe tab (the bit as the probe: touch.js), apart from its Auto probe tab
+const touchTab = new TouchTab(machine, {
+  log: (text, kind) => status(text, kind),
+  area: gcodeArea,
+  onStart: settings => startTouchScan(settings),
+  onSave: () => saveScanAs('touch'),
+  changed: () => scanPanel.show(),
+});
 const scanPanel = new ScanPanel(machine, {
   log: (text, kind) => status(text, kind),
-  area: () => (state.job && Number.isFinite(state.job.lo[0]) ? { lo: state.job.lo, hi: state.job.hi } : null),
+  area: gcodeArea,
+  touch: touchTab,
   onStart: settings => startScan(settings),
-  onSave: () => saveScanAs(),
+  onSave: () => saveScanAs('auto'),
   onLevel: (opts, name) => levelProgram(opts, name),
   onLevelOff: () => levelOff(),
   onSaveLeveled: () => saveLeveledAs(),
@@ -960,6 +971,7 @@ function pendantNote() {
 const mach = {
   link: '', linkMsg: '', connected: false, port: null, firmware: null, status: null, modal: null,
   axes: null, jog: null, zeroUndo: null, alarm: null, program: null, job: null, pendant: null, probe: null, scan: null, prog,
+  autoScan: null, touch: null,       // (the auto probe's scan and the touch scan; scan: the newer of the two, see currentScan)
   lev, levelSettings: null,
 };
 const live = () => mach.link === 'up' && mach.connected;
@@ -1012,7 +1024,9 @@ machine.onSnapshot = s => {
   });
   konsole.replay(s.console || []);
   if (s.jogSettings) jogPanel.serverSettings(jogSettingsOf(s.jogSettings));
-  scanEvent(s.scan ?? null, true);
+  mach.autoScan = s.scan ?? null;
+  mach.touch = s.touch ?? null;
+  scanEvent(currentScan(), true);
   pendantDlg.setState(mach.pendant);
   jobChanged(null);
   // A leveled program this page shows that the server doesn't have now (it was restarted, or leveling was
@@ -1079,7 +1093,17 @@ machine.onJob = ev => {
 machine.onJogSettings = js => jogPanel.serverSettings(js);
 machine.onPendant = ev => { mach.pendant = ev.pendant ?? null; pendantDlg.setState(mach.pendant); machineChanged(); };
 machine.onProbe = ev => { mach.probe = ev.probe ?? null; machineChanged(); };
-machine.onScan = ev => { scanEvent(ev.scan ?? null, false); machineChanged(); };
+machine.onScan = ev => { mach.autoScan = ev.scan ?? null; scanEvent(currentScan(), false); machineChanged(); };
+machine.onTouch = ev => { mach.touch = ev.touch ?? null; scanEvent(currentScan(), false); machineChanged(); };
+
+/** "The scan" of either kind (the auto probe's or the touch scan): the one running, else the one started last (the
+ *  server's "last scan" for auto-level is that one too, when it is complete). */
+function currentScan() {
+  const a = mach.autoScan, t = mach.touch;
+  if (t?.running) return t;
+  if (a?.running || !t?.started) return a;
+  return !a?.started || t.started > a.started ? t : a;
+}
 
 /** The job changed (was: the job before; null: look again, the G-code shown changed). While it runs the
  *  editor is read-only and follows its line. */
@@ -1173,8 +1197,10 @@ function softReset() {
     return machineCall('Stop the job', () => machine.stop());
   }
   if (mach.scan?.running) {
-    if (!confirm('Stop the surface scan?\n\nThe probe stops at once, and the machine stops safely: a Hold first, then a Soft Reset once '
-      + 'it has stopped (the position is kept). The points measured so far stay.')) return;
+    const touch = mach.scan === mach.touch;
+    if (!confirm(`Stop the ${touch ? 'touch' : 'surface'} scan?\n\n${touch ? '' : 'The probe stops at once, and '}The machine stops safely: `
+      + 'a Hold first, then a Soft Reset once it has stopped (the position is kept), then Z goes all the way up. The points '
+      + 'measured so far stay.')) return;
     machinePanel.noteReset(); machineChanged();
     return machineCall('Stop the scan', () => machine.stop());
   }
@@ -1199,7 +1225,9 @@ async function runJob() {
   why = runWhy(mach) || (!programInSync() ? 'the G-code could not be loaded on the server' : '');
   if (why) { status(`Run: ${why}`, 'err'); return; }
   const p = mach.program, skipped = p.total - p.lines, warn = prog.warnings || [];
-  if (!confirm(`Run ${p.name}?\n\n${p.lines.toLocaleString()} lines to send`
+  // (a touch scan completed since connecting: its clip may still be on the bit)
+  const clip = mach.touch?.clipWarn ? '⚠ Remove the probe clip from the bit before running.\n\n' : '';
+  if (!confirm(`${clip}Run ${p.name}?\n\n${p.lines.toLocaleString()} lines to send`
     + (skipped > 0 && !lev.active ? ` (${p.total.toLocaleString()} in the file; comments and empty lines are not sent)` : '')
     + `.${levelNote()}\n\n${runModes()}\n\nThe spindle and the moves start: check the bit, the work zero and the clamps.\n\n`
     + 'Hold pauses it, Resume goes on, Soft Reset stops the job safely.'
@@ -1327,6 +1355,17 @@ function startScan(settings) {
     + `and the clamps. At each point the probe goes down to the surface and back up ${s.zRetract} in.\n\n`
     + 'Stop (or Soft Reset) stops it.')) return;
   return machineCall('Start Scan', () => machine.scanStart(settings));
+}
+
+/** Start Touch Scan (the Touch probe tab), after asking. */
+function startTouchScan(settings) {
+  const s = settings, n = s.xPoints * s.yPoints;
+  if (!confirm(`Start the touch scan?\n\n${n} points (${s.xPoints} × ${s.yPoints}) over X ${s.minX} … ${s.maxX} and Y ${s.minY} … ${s.maxY} in `
+    + '(work), with the bit itself as the probe: no offset.\n\nSPINDLE OFF. The clip on the copper (or the stock), the other lead on '
+    + `the bit. At each point the bit comes down at ${s.feed} in/min until it touches (G38.2, down to Z −${s.depth} at most), then `
+    + `goes back up to Z ${s.clearance}; between points it moves (G0) at Z ${s.clearance}: make sure that clears the clamps.\n\n`
+    + 'Pause stops after the point it is at; Stop stops the machine safely and raises Z all the way up.')) return;
+  return machineCall('Start Touch Scan', () => machine.touchStart(settings));
 }
 
 function disconnect() {
@@ -1507,7 +1546,8 @@ const scanSaveBrowser = new FileBrowser({
   onPick: () => {},
 });
 scanSaveDlg.querySelector('.dbody').append(scanSaveBrowser.root);
-const scanSaveable = () => scanDone(mach.scan);
+let saveWhich = 'auto';               // Save Scan… of the Auto probe tab ('auto') or the Touch probe tab ('touch')
+const scanSaveable = () => scanDone(saveWhich === 'touch' ? mach.touch : mach.autoScan);
 async function doSaveScan() {
   let name = scanSaveName.value.trim();
   if (!name) return;
@@ -1517,22 +1557,23 @@ async function doSaveScan() {
   if (exists && !confirm(`${name} already exists. Replace it?`)) return;
   scanSaveDlg.close();
   try {
-    const res = await machine.scanSave(path);
+    const res = await (saveWhich === 'touch' ? machine.touchSave(path) : machine.scanSave(path));
     const saved = res?.path || path;
     status(`Saved the scan to ${saved}`);
-    scanPanel.say(`Saved to ${saved}`, 'good');
+    (saveWhich === 'touch' ? touchTab : scanPanel).say(`Saved to ${saved}`, 'good');
     if (state.liveScan) { state.scanPath = saved; refreshTitles(); }
     addRecent(saved);
     files.load(files.dir);
   } catch (e) {
     const msg = e.status === 404 ? 'this FluidSender server does not have it yet (restart FluidSender after the update)' : e.message;
     status(`Save Scan failed: ${msg}`, 'err');
-    scanPanel.say(`Not saved: ${msg}`, 'bad');
+    (saveWhich === 'touch' ? touchTab : scanPanel).say(`Not saved: ${msg}`, 'bad');
   }
 }
 scanSaveDlg.querySelector('[data-act=ok]').onclick = doSaveScan;
 scanSaveName.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); doSaveScan(); } };
-function saveScanAs() {
+function saveScanAs(which = 'auto') {
+  saveWhich = which;
   if (!scanSaveable()) return;
   scanSaveName.value = 'scan.xyz';
   scanSaveBrowser.load(state.gcodePath ? dirName(state.gcodePath) : undefined);

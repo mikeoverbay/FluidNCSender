@@ -12,7 +12,7 @@ export class MachineClient {
   constructor() {
     // Set by the app. Each gets the event object as the server sent it.
     this.onSnapshot = null;   // first event on every stream: connected, port, firmware, status, modal, axes, jog,
-                              // zeroUndo, alarm, program, job, jogSettings, pendant, probe, scan, console[]
+                              // zeroUndo, alarm, program, job, jogSettings, pendant, probe, scan, touch, console[]
     this.onStatus = null;     // state, wpos, mpos, feed, spindle, flood, mist (true | false | null: not known), …
                               // (at most 5 a second). Stage 5: ov [feed, rapid, spindle] %, ovTarget (the values
                               // being set, or null), programmedF / programmedS (in force), spindleType, and for
@@ -33,6 +33,7 @@ export class MachineClient {
     this.onPendant = null;    // pendant: { port, state: 'off' | 'waiting' | 'connected', since, lastKey }
     this.onProbe = null;      // probe: { port, connected, ready, busy, last, connecting, mayBeDown }
     this.onScan = null;       // scan: { running, point, points, settings, result, error, savedTo }
+    this.onTouch = null;      // touch: the touch probe scan, the same fields and paused, pausing, clipWarn
     this.onLink = null;       // (link, message): the event stream itself is 'up', 'down' or 'missing'
     this.link = '';
     this.connected = false;
@@ -120,6 +121,7 @@ export class MachineClient {
       else if (ev.type === 'pendant') this.onPendant?.(ev);
       else if (ev.type === 'probe') this.onProbe?.(ev);
       else if (ev.type === 'scan') this.onScan?.(ev);
+      else if (ev.type === 'touch') this.onTouch?.(ev);
       // 'ping' only keeps the stream alive
     } catch (e) {
       console.error('machine: handling a', ev.type, 'event failed', e);   // a page bug must not drop the stream
@@ -211,6 +213,14 @@ export class MachineClient {
   scanSettings(settings) { return apiJson('/api/scan/settings', settings); }
   /** Writes the last scan to path (.xyz, the UGS format). */
   scanSave(path) { return apiJson('/api/scan/save', { path }); }
+
+  // The touch probe scan (the bit itself through FluidNC's probe input: touchscan.py), apart from the auto probe's
+  touchStart(settings) { return apiJson('/api/touch/start', { settings }); }
+  touchStop() { return apiJson('/api/touch/stop', {}); }
+  touchPause() { return apiJson('/api/touch/pause', {}); }
+  touchResume() { return apiJson('/api/touch/resume', {}); }
+  touchSettings(settings) { return apiJson('/api/touch/settings', settings); }
+  touchSave(path) { return apiJson('/api/touch/save', { path }); }
 }
 
 /** A job that is still going (running, paused or stopping), as the server's job event says. */

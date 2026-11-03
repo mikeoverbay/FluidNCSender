@@ -527,6 +527,16 @@ button.go:hover { background: var(--go-hover); }
 .sc-grid { flex: 1 1 146px; max-width: 230px; }
 .sc-run { flex: 1 1 90px; max-width: 150px; }
 .sc-level { flex: 1 1 158px; max-width: 280px; }
+.sc-tgrid { flex: 1 1 146px; max-width: 230px; }
+.sc-tset { flex: 1 1 160px; max-width: 240px; }
+.sc-trun { flex: 1 1 90px; max-width: 150px; }
+/* The two kinds of probing, one tab each (the Apply column is shared, outside them); a tab whose scan runs shows a dot */
+.stabs { display: flex; gap: 2px; margin: 0 0 4px; border-bottom: 1px solid var(--line, #555); }
+.stabs button { padding: 1px 10px; border-radius: 4px 4px 0 0; border-bottom: none; background: transparent; color: var(--dim);
+  font-size: 13.75px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.stabs button.on { background: var(--panel, var(--bg)); color: var(--text); box-shadow: inset 0 2px 0 var(--accent); }
+.stabs button.busy::after { content: ' ●'; color: var(--good); }
+.tpin, .tverify { font-weight: 600; }
 .scol > button { padding: 2px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .scan select { min-width: 0; width: 100%; padding: 1px 3px; }
 .shead { display: flex; align-items: center; gap: 4px; min-height: 18px; }

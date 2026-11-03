@@ -98,7 +98,7 @@ import traceback
 from collections import namedtuple
 
 from job import ACTIVE
-from machine import (BAUDS, NO_RESUME, SAFE_Z, SETTLE, MachineError, can_move, close_port, fixed, holders_text,
+from machine import (BAUDS, NO_RESUME, SAFE_Z, SCANS, SETTLE, MachineError, can_move, close_port, fixed, holders_text,
                      open_port, port_kind, process_name, scan_holders)
 
 BAUD = 9600
@@ -215,7 +215,7 @@ def machine_view(m):
     settling = getattr(link, "after_reset", None) is not None and not getattr(link, "reset_clean", True)
     alarm = getattr(link, "alarm", None)
     return View(state, getattr(job, "state", None), getattr(job, "error", None), getattr(job, "name", None),
-                getattr(m, "activity", None) == "scan", stopping, settling, st.get("sub") if st else None,
+                getattr(m, "activity", None) in SCANS, stopping, settling, st.get("sub") if st else None,
                 isinstance(alarm, dict) and bool(alarm.get("critical")),
                 state == "Idle" and link is not None and just_sent(link))
 

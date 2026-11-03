@@ -9,15 +9,16 @@ go at that height. The first touch after the probe was homed reads 0.0 and the o
 so a scan needs a homed probe; when every point is in, the probe is homed (H) and the CNC goes back to the
 first point.
 
-Over travel (the probe found no surface) or any other failure ends the scan: the probe is aborted and
-homed, and the message says what happened (UGS's words). Stop aborts the probe at once and safe-stops the
-CNC. The result is written as soon as the last point is in, to scans/last-scan.xyz next to this file
-(FLUIDSENDER_SCANS overrides the folder), in exactly the format UGS saves (SaveScannedSurfaceAction.java):
-four "#" header lines, then "x y z" per point, by X then Y ascending, numbers as Java's Double.toString
-writes them. FluidSender adds a fifth "#" line, the setup the scan was taken in, for auto-level's same-setup
-check (leveling.py): "# wcs=G54 wcoX=-5.905512 wcoY=-3.937008 wcoZ=-1.181102 time=1760700000", FluidNC's work
-coordinate system and work offset (in) and the unix time (UGS reads only its own keys from the "#" lines). Once a
-scan is complete, a leveled program goes back to its original (machine.scan_complete).
+Over travel (the probe found no surface) or any other failure ends the scan: the probe is aborted and homed, and
+the message says what happened (UGS's words). Stop aborts the probe at once and safe-stops the CNC; the probe is
+then homed, and the CNC's Z raised to the top of its travel (machine.scan_raise; the pendant's and the page's
+machine Stop the same). The result is written as soon as the last point is in, to scans/last-scan.xyz next to this
+file (FLUIDSENDER_SCANS overrides the folder), in exactly the format UGS saves (SaveScannedSurfaceAction.java):
+four "#" header lines, then "x y z" per point, by X then Y ascending, numbers as Java's Double.toString writes
+them. FluidSender adds a fifth "#" line, the setup the scan was taken in, for auto-level's same-setup check
+(leveling.py): "# wcs=G54 wcoX=-5.905512 wcoY=-3.937008 wcoZ=-1.181102 time=1760700000", FluidNC's work coordinate
+system and work offset (in) and the unix time (UGS reads only its own keys from the "#" lines). Once a scan is
+complete, a leveled program goes back to its original (machine.scan_complete).
 """
 
 import math
@@ -587,7 +588,7 @@ class Scanner:
                     self.changed()
             except Exception as e:
                 if self.stopped(e):
-                    return "stopped", f"{STOPPED} {self.stop_home()}"
+                    return "stopped", f"{STOPPED} {self.stop_home()}{self.raise_head()}"
                 if isinstance(e, (ProbeOverTravel, _OverTravel)):
                     return "failed", self.over_travel(str(e))
                 return "failed", f"Scan failed: {_sentence(e)} {self.retract()}"
@@ -618,7 +619,7 @@ class Scanner:
                 self.move(*self.bit_at(xs[0], ys[0]))
             except Exception as e:
                 if self.stopped(e):
-                    return "stopped", f"{STOPPED_DONE} {self.stop_home()}"
+                    return "stopped", f"{STOPPED_DONE} {self.stop_home()}{self.raise_head()}"
                 return "failed", ("Scan failed: the final probe retract / return did not finish (scan data was "
                                   f"kept): {_sentence(e)}")
             took = int(time.time() - self.started)
@@ -656,6 +657,20 @@ class Scanner:
             except Exception as e:          # not connected, no reply, error...
                 return STOP_NOT_HOMED.format(self.why(e))
         return STOP_NOT_HOMED.format(self.why(why))
+
+    def raise_head(self):
+        """After a Stop, once the probe is homed (or not): the CNC's Z all the way up (machine.scan_raise: once the
+        stop is over and FluidNC Idle, G53 to the top of its Z travel; never in an alarm, nor with the travel
+        unknown, which it says instead). Returns what to add to the message, starting with a space ("" from a
+        machine that can't)."""
+        up = getattr(self.machine, "scan_raise", None)
+        if up is None:
+            return ""
+        try:
+            return f" {up()}"
+        except Exception as e:              # (a bug there: the scan still ends)
+            traceback.print_exc()
+            return f" Raise Z by hand: it could not be raised ({e!r})."
 
     def retract(self):
         """After any other failure: abort and home the probe (when possible). Returns what to add to the message."""
