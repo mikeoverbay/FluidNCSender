@@ -10,6 +10,9 @@ Bluetooth jog pendant (pendant.py). Listens on this computer only.
     python3 server.py              then open http://localhost:8765
     python3 server.py --dir PATH   start the file list in PATH
 
+On Windows FluidSender.bat starts it (py server.py); the file list then starts in Documents (else the home
+folder), and there is no share to mount (hostos.py).
+
 The /api/ calls only answer the page itself: they need the X-FluidSender header (other
 websites can't send it) and a localhost Host header (blocks DNS rebinding).
 
@@ -27,6 +30,7 @@ out; a refused one answers 409 (400 for a bad call) with {"error": reason}:
 
   /api/machine/...
     connect {"port", "baud", "force"}   disconnect {}            send {"line": "G0 X1"}
+      (GET ports lists the Demo machine last: {"port": "Demo machine"} connects to a simulated FluidNC)
     realtime {"cmd": "hold" | "resume" | "reset" | "status" | "jogcancel"}
     jog {"step": {"x": 0.1, "y": 0, "z": 0}, "feed": 150}     -> {"ok": true, "line": "$J=..."}
     jog {"start": {"x": 1, "y": -1, "z": 0}, "feed": 150}     -> {"ok": true, "id": 7}  (a hold jog)
@@ -66,7 +70,6 @@ import json
 import os
 import select
 import signal
-import subprocess
 import sys
 import threading
 import time
@@ -76,6 +79,7 @@ import webbrowser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import hostos
 from machine import RELEASE_AFTER, Machine, MachineError
 from settings import Settings, SettingsError
 
@@ -83,10 +87,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
 GCODE_EXT = (".nc", ".gcode", ".ngc", ".tap")
 EXTENSIONS = GCODE_EXT + (".xyz",)
-GVFS = f"/run/user/{os.getuid()}/gvfs/"
-SHARE_URL = "smb://10.0.0.31/mikes_creations"     # MIKESMACHINE's share; gvfs shows it at DEFAULT_DIR's top
-DEFAULT_DIR = GVFS + "smb-share:server=10.0.0.31,share=mikes_creations/!_CarveMaker"
-MOUNT_RETRY = 30        # s between tries to mount the share while it isn't there
+DEFAULT_DIR = hostos.DEFAULT_DIR    # Linux: the CarveMaker share; Windows: Documents (hostos.py)
 MAX_FILE = 64 * 1024 * 1024
 MAX_BIG_CALL = 2 * MAX_FILE + 64 * 1024     # a 64 MB file as JSON text (its escapes make it longer)
 MAX_CALL = 64 * 1024
@@ -193,7 +194,7 @@ class Handler(SimpleHTTPRequestHandler):
             if url.path == "/api/file":
                 return self.read_file(q.get("path", [""])[0])
             if url.path == "/api/machine/ports":
-                return self.send_json(self.machine.ports())
+                return self.send_json(self.machine.ports(demo=True))     # (the Demo machine last)
             if url.path == "/api/machine/state":
                 return self.send_json(self.machine.snapshot())
             if url.path == "/api/machine/events":
@@ -398,8 +399,8 @@ class Handler(SimpleHTTPRequestHandler):
     def list_dir(self, path):
         asked = path
         path = os.path.abspath(os.path.expanduser(path or self.start_dir))
-        if os.path.realpath(path).startswith(GVFS) and not os.path.isdir(path):     # (or a link to the share)
-            mount_share()       # not mounted yet (the server can start before the desktop mounts it)
+        if hostos.needs_mount(path):
+            hostos.mount_share()    # not mounted yet (the server can start before the desktop mounts it)
         if not asked and not os.path.isdir(path):
             path = os.path.expanduser("~")      # the share is out of reach: start at home this time
         try:
@@ -457,24 +458,6 @@ class Handler(SimpleHTTPRequestHandler):
                 pass
             return self.send_json({"error": f"{path}: {e.strerror}"}, 500)
         self.send_json({"ok": True, "path": path, "size": os.path.getsize(path)})
-
-
-_mount_lock = threading.Lock()
-_mount_tried = 0.0
-
-
-def mount_share():
-    """Mounts the Windows share with gio (its saved login, never a prompt), at most every MOUNT_RETRY s."""
-    global _mount_tried
-    with _mount_lock:
-        if time.monotonic() - _mount_tried < MOUNT_RETRY:
-            return
-        _mount_tried = time.monotonic()
-        try:
-            subprocess.run(["gio", "mount", SHARE_URL], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=15)
-        except (OSError, subprocess.SubprocessError):
-            pass
 
 
 def main():

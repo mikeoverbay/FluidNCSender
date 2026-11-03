@@ -29,23 +29,19 @@ take the warning away. The user's own Disconnect leaves it as it is.
 """
 
 import errno
-import fcntl
 import math
 import os
 import re
-import select
-import struct
-import termios
 import threading
 import time
 import traceback
 from collections import deque
 from decimal import ROUND_HALF_UP, Context, Decimal
 
-from machine import (WRITE_TIMEOUT, MachineError, close_port, describe_port, open_port, other_holders,
-                     port_kind, usb_info)
+from machine import (WRITE_TIMEOUT, MachineError, close_port, describe_port, open_port, other_holders, port_exists,
+                     port_kind, real_port, usb_info)
 
-BAUD = termios.B115200
+BAUD = 115200
 REPLY_TIMEOUT = 9.0     # UGS waits this long for every probe reply
 SETTLE = 1.0            # the board needs this long after the port opens (probe_check.py)
 QUIET = 0.05            # draining: the input is drained after this long without a byte ...
@@ -94,14 +90,12 @@ def default_port(ports):
 
 
 class _Port:
-    """One open probe port, its reader thread and the pipe that wakes it."""
+    """One open probe port (a port object of the ports package, which wakes its reader too) and its reader
+    thread."""
 
-    def __init__(self, fd, path):
-        self.fd = fd
+    def __init__(self, port, path):
+        self.port = port
         self.path = path
-        self.wake_r, self.wake_w = os.pipe()
-        os.set_blocking(self.wake_r, False)
-        os.set_blocking(self.wake_w, False)
         self.thread = None
 
 
@@ -176,8 +170,8 @@ class Probe:
 
     def check_port(self, path, force):
         """Raises unless path may be opened as the probe's port."""
-        real = os.path.realpath(path)
-        tests = {os.path.realpath(p) for p in self.test_ports}
+        real = real_port(path)
+        tests = {real_port(p) for p in self.test_ports}
         if self.only_test_ports and real not in tests:
             raise MachineError(f"{path} is not one of the test ports this server may open")
         if real in tests:
@@ -190,7 +184,7 @@ class Probe:
             raise MachineError(f"{path} is a Bluetooth port (the jog pendant), not the probe. Not connected.")
         if kind != "usb-acm":
             raise MachineError(f"{path} is not a USB serial port like the probe's (/dev/ttyACM...)")
-        if not os.path.exists(real):
+        if not port_exists(real):
             raise MachineError(f"{path} is not there (unplugged?)")
         vid, pid, product = usb_info(os.path.basename(real))
         if (vid, pid) != LEONARDO and "leonardo" not in (product or "").lower() and not force:
@@ -206,16 +200,12 @@ class Probe:
         others = other_holders(real)
         if others:
             raise in_use(others)
-        fd = open_port(real, BAUD)
+        opened = open_port(real, BAUD)
         others = other_holders(real)        # someone may have opened it just before we locked it
         if others:
-            close_port(fd)
+            close_port(opened)
             raise in_use(others)
-        try:
-            port = _Port(fd, path)
-        except OSError as e:
-            close_port(fd)
-            raise MachineError(f"Could not connect to the probe: {e.strerror}")
+        port = _Port(opened, path)
         port.thread = threading.Thread(target=self.reader, args=(port,), name=f"probe {path}", daemon=True)
         with self.lock:
             self.port = port
@@ -230,9 +220,7 @@ class Probe:
         except BaseException:
             with self.lock:
                 self.port = None
-            close_port(port.fd)
-            os.close(port.wake_r)
-            os.close(port.wake_w)
+            close_port(port.port)
             raise
         end = time.monotonic() + SETTLE     # the board settles; what it says meanwhile is logged, not kept
         with self.lock:
@@ -275,20 +263,13 @@ class Probe:
             self.ready = False              # (down stays: the tip is where it was)
             self.gone = why
             self.lock.notify_all()
-        try:
-            os.write(port.wake_w, b"x")
-        except OSError:
-            pass
+        port.port.wake()
         if port.thread is not threading.current_thread():
             port.thread.join(WRITE_TIMEOUT + 2)
         with self.wlock:                    # only once the reader has stopped: the fd number may be reused next
-            close_port(port.fd)
-            port.fd = None
-        for w in (port.wake_r, port.wake_w):
-            try:
-                os.close(w)
-            except OSError:
-                pass
+            opened, port.port = port.port, None
+            if opened is not None:
+                close_port(opened)
         if why:
             self.log(kind, why)
         self.changed()
@@ -297,14 +278,14 @@ class Probe:
         why = None
         try:
             while True:
-                ready = select.select([port.fd, port.wake_r], [], [])[0]
+                readable = port.port.wait(None)
                 with self.lock:
                     if self.port is not port:
                         return
-                if port.wake_r in ready:
-                    return
+                if not readable:            # (woken: only close() wakes it, and then the port is gone)
+                    continue
                 try:
-                    data = os.read(port.fd, 1024)
+                    data = port.port.read(1024)
                 except BlockingIOError:
                     continue
                 if not data:
@@ -375,12 +356,12 @@ class Probe:
     def write(self, data):
         """Writes all of data (wlock held)."""
         port = self.port
-        if port is None or port.fd is None:
+        if port is None or port.port is None:
             raise OSError(errno.EBADF, "not connected")
         end = time.monotonic() + WRITE_TIMEOUT
         while data:
             try:
-                n = os.write(port.fd, data)
+                n = port.port.write(data)
             except BlockingIOError:
                 n = 0
             data = data[n:]
@@ -457,8 +438,8 @@ class Probe:
     def unread(self):
         """Bytes the port has that the reader hasn't taken yet."""
         try:
-            return struct.unpack("i", fcntl.ioctl(self.port.fd, termios.FIONREAD, b"\0" * 4))[0]
-        except (OSError, TypeError, AttributeError):
+            return self.port.port.unread()
+        except (OSError, AttributeError):
             return 0
 
     def reply(self, gen):

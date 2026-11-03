@@ -38,7 +38,8 @@ Chrome app window. It is **inch-first** everywhere.
 
 | What | Notes |
 |---|---|
-| Linux | Built and used on Ubuntu 24.04 |
+| Linux | Built and used on Ubuntu 24.04; **Linux Mint is the recommended platform** |
+| or Windows 10 / 11 | Works too: see [Running on Windows](#running-on-windows) (less tested) |
 | Python 3.8+ | Standard library only |
 | Google Chrome | The UI runs in a `--app` window (set `FLUIDSENDER_BROWSER` to use Chromium) |
 | `curl`, `ss` (iproute2) | Used by the launcher |
@@ -57,6 +58,29 @@ cd ~/fluidsender
 
 Then **Machine → Connect…**, pick your FluidNC port (usually `/dev/ttyUSB0`), and you're running.
 
+## Running on Windows
+
+Linux Mint is the recommended platform, but FluidSender runs on Windows 10 and 11 too:
+
+1. Install **Python 3.12** (or newer) from [python.org](https://www.python.org/downloads/). In the installer, tick
+   **Add python.exe to PATH**.
+2. Get FluidSender: on GitHub press **Code → Download ZIP** and unzip it (or `git clone` it).
+3. Double-click **`FluidSender.bat`** in the FluidSender folder.
+
+It starts the server in a minimized window called *FluidSender server* (close that window to stop FluidSender) and
+opens the page in a Chrome or Edge app window. In **Machine → Connect…** the FluidNC controller is a `COM` port
+(`COM3`, …). The file list starts in your Documents folder. Windows can't tell which program has a port open, so a
+port UGS holds is refused when FluidSender tries to open it (with that message), not marked in the list.
+
+## Try it without a machine: Demo machine
+
+**Machine → Connect…** lists a **Demo machine** last: a simulated FluidNC that runs inside FluidSender, on Linux and
+Windows alike. Nothing real moves, but it answers like the real controller: it starts in ALARM (unhomed), **Home**
+sends it home, jogs and Zero move the readout, the spindle speed shows a second after `M3 S…`, the vacuum / AUX
+switches and overrides work, soft limits are on, and **Run** streams a G-code file. The status bar says
+*Connected: Demo machine (simulated: nothing real moves)*. It is never chosen or connected by itself, and
+**Disconnect** stops it.
+
 ## How-to guides
 
 | Guide | |
@@ -74,9 +98,12 @@ Then **Machine → Connect…**, pick your FluidNC port (usually `/dev/ttyUSB0`)
 
 ```
 fluidsender.sh    launcher: starts the server if needed and opens the Chrome app window
+FluidSender.bat   the same on Windows (Chrome or Edge)
 setup.sh          one-time setup / requirements check
 server.py         HTTP server + JSON API (port 8765)
-machine.py        FluidNC link: serial, streaming, status, safety rules
+machine.py        FluidNC link: streaming, status, safety rules
+ports/           the serial ports: posix.py (Linux, termios), windows.py (COM ports, Win32), demo.py (the Demo machine)
+hostos.py         the other Linux / Windows differences (the file list's start folder, the share)
 job.py            job streaming
 settings.py       settings.json (jog, scan, level, ports, zero history)
 probe.py scan.py  surface probe and scan

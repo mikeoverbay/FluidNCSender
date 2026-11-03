@@ -3,7 +3,7 @@
 
 import { store } from './api.js';
 import { explain } from './codes.js';
-import { firmwareName, jobActive } from './machine.js';
+import { firmwareName, jobActive, DEMO_PORT } from './machine.js';
 import { TwoStep, mouseOnly } from './twostep.js';
 
 function el(tag, cls, html) {
@@ -409,7 +409,7 @@ export class MachinePanel {
     set(this.f.pins, [...pins].map(c => PIN_NAMES[c] || c).join(', '));
     set(this.f.fw, live && m.firmware ? firmwareName(m.firmware) : '—');
     this.f.fw.title = live ? m.firmware || '' : '';
-    set(this.f.port, live && m.port ? m.port : '—');
+    set(this.f.port, live && m.port ? (m.port === DEMO_PORT ? `${m.port} (simulated FluidNC)` : m.port) : '—');
 
     for (const row of this.when) row.hidden = (row.dataset.when === 'live') !== live;
     this.btn.conn.disabled = m.link !== 'up';

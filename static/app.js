@@ -8,7 +8,7 @@ import { MenuBar } from './menu.js';
 import { InfoPanel, MachinePanel, ConsolePanel, runWhy, fmtClock, undoWhen } from './panels.js';
 import { JogPanel } from './jog.js';
 import { ScanPanel, scanPoints, scanTotal, scanDone, scanResultGrid, levelName, levelCoverage, levelMismatch } from './scan.js';
-import { MachineClient, firmwareName, jobActive, jogSettingsOf } from './machine.js';
+import { MachineClient, firmwareName, jobActive, jogSettingsOf, DEMO_PORT } from './machine.js';
 import { ConnectDialog } from './connect.js';
 import { PendantDialog, pendantChip } from './pendant.js';
 import { readFile, saveFile, baseName, dirName, isScan, store } from './api.js';
@@ -976,7 +976,8 @@ function machineChanged() {
   if (w) viewer.setTool(w[0], w[1], w[2]); else viewer.setTool(null);
   if (live()) { trackWco(mach.status); useFluidncTravel(mach.axes); }
   const fw = firmwareName(mach.firmware);
-  $('sconn').textContent = live() ? `Connected: ${mach.port}${fw ? ' · ' + fw : ''}` : 'Not connected';
+  const demo = mach.port === DEMO_PORT;     // (the simulated FluidNC: say so, nothing real moves)
+  $('sconn').textContent = live() ? `Connected: ${mach.port}${demo ? ' (simulated: nothing real moves)' : fw ? ' · ' + fw : ''}` : 'Not connected';
   $('sconn').classList.toggle('on', live());
   const chip = pendantChip(mach.link === 'up' ? mach.pendant : null, pendantNote());
   $('spend').textContent = chip.text;

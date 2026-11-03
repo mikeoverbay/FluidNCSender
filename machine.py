@@ -1,9 +1,14 @@
 """
 FluidNC connection for FluidSender: one serial port, opened only when the user presses Connect.
 
-Python standard library only (termios). A port is opened only if no other program has it open,
-and is then held exclusively (TIOCEXCL), so FluidSender never fights UGS, the probe or the
+Python standard library only (the ports themselves: the ports package; termios on Linux, Win32 COM ports
+on Windows). A port is opened only if no other program has it open, and is then held exclusively (TIOCEXCL;
+a Windows COM port is exclusive anyway), so FluidSender never fights UGS, the probe or the
 pendant for a port. It never connects or reconnects by itself.
+
+The Demo machine (the port DEMO_PORT, "Demo machine", last in the Connect dialog's list) is no port: connecting
+to it starts tools/fake_fluidnc.py's simulator in a thread of this process, on a socket pair, and everything
+below works with it as with FluidNC (ports/demo.py). Disconnect stops it.
 
 The only bytes FluidSender sends on its own: one ^L (0x0C) when it connects, before the first '?'
 (it turns off FluidNC's UART echo mode, which an earlier terminal session can leave on); '?' every
@@ -54,13 +59,10 @@ inches here, so the page never sees millimeters.
 """
 
 import errno
-import fcntl
 import json
 import math
 import os
 import re
-import select
-import termios
 import threading
 import time
 import traceback
@@ -68,6 +70,8 @@ from collections import deque
 
 from job import WORD, WORDS, ProgramError, clock_text, coolant_after, coolant_words, parse_program
 from leveling import Leveling, LevelingError, pre_leveled
+from ports import (BAUDS, DEMO_PORT, PortError, describe_port, fd_port, list_ports, open_serial, port_exists,
+                   port_kind, process_name, real_port, scan_holders, start_demo, usb_info)
 from settings import ZERO_KEEP, Settings, SettingsError, jog_feed, jog_step
 
 MM = 25.4
@@ -117,9 +121,6 @@ MAX_SCAN_XY = 100.0   # in: a scan point further out than this is a mistake
 MOVE_SETTLE = 0.25    # Stop takes FluidNC as maybe moving until a report this long after the last ok to a line
                       # that can move it (it starts the move just after the ok; the rest is margin): see may_move
 
-BAUDS = {b: getattr(termios, f"B{b}") for b in (9600, 19200, 38400, 57600, 115200, 230400, 460800,
-                                                500000, 921600, 1000000, 1500000, 2000000)
-         if hasattr(termios, f"B{b}")}
 JOG_CANCEL = b"\x85"  # acts only while FluidNC jogs; never Ctrl-X for that (a reset while moving is ALARM:3)
 REALTIME = {"hold": b"!", "resume": b"~", "reset": b"\x18", "status": b"?", "jogcancel": JOG_CANCEL}
 # FluidNC's coolant toggles: at once, and only in Idle, Run or Hold. Flood (M8) is the user's vacuum,
@@ -198,8 +199,6 @@ ALARMS = {
     17: "G-code error in a FluidNC file job", 18: "probe touched during a move (probe hard limit)",
 }
 RISKY = {"usb-acm": "the Z probe (Arduino Leonardo)", "bluetooth": "the Bluetooth jog pendant"}
-KNOWN_USB = {("1a86", "7523"): "CH340 USB serial (FluidNC?)", ("2341", "8036"): "Arduino Leonardo (Z probe)"}
-SYS_TTY = "/sys/class/tty"
 # FluidNC answers a line only when it is done, and lines wait behind moves (M3/M5/M8/M9, G4, G10, a full
 # planner, M0 until resumed...): while it reports one of these states, a waiting line is not overdue
 BUSY_STATES = ("Home", "Run", "Jog", "Hold", "Door")
@@ -748,87 +747,8 @@ def _per_inch(v):
     return None if v is None else round(v / MM, 3)
 
 
-# ------------------------------------------------------------------ ports (only /dev, /sys and /proc are read)
-
-def port_kind(path):
-    name = os.path.basename(path)
-    if name.startswith("ttyUSB"):
-        return "usb-serial"
-    if name.startswith("ttyACM"):
-        return "usb-acm"
-    if name.startswith("rfcomm"):
-        return "bluetooth"
-    if path.startswith("/dev/pts/"):
-        return "pty"
-    return "other"
-
-
-def _read(path):
-    try:
-        with open(path, "rb") as f:
-            return f.read().decode(errors="replace").strip()
-    except OSError:
-        return ""
-
-
-def usb_info(name, sys_tty=SYS_TTY):
-    """(vid, pid, product) of the USB device behind /dev/<name>, from /sys; Nones if it isn't USB."""
-    d = os.path.realpath(os.path.join(sys_tty, name, "device"))
-    for _ in range(4):            # tty -> interface -> USB device
-        if os.path.isfile(os.path.join(d, "idVendor")):
-            return (_read(os.path.join(d, "idVendor")) or None, _read(os.path.join(d, "idProduct")) or None,
-                    _read(os.path.join(d, "product")) or None)
-        d = os.path.dirname(d)
-    return None, None, None
-
-
-def describe_port(path, sys_tty=SYS_TTY):
-    real = os.path.realpath(path)
-    kind = port_kind(real)
-    vid = pid = product = None
-    if kind in ("usb-serial", "usb-acm"):   # (an rfcomm port's /sys parent is the Bluetooth adapter: not useful)
-        vid, pid, product = usb_info(os.path.basename(real), sys_tty)
-    label = KNOWN_USB.get((vid, pid))
-    if not label:
-        label = {"bluetooth": "Bluetooth (pendant)", "pty": "Pseudo terminal (simulator?)"}.get(kind)
-    if not label:
-        base = product or {"usb-serial": "USB serial", "usb-acm": "USB serial (ACM)"}.get(kind, "Serial port")
-        label = f"{base} ({vid}:{pid})" if vid else base
-    return {"path": path, "label": label, "kind": kind, "vid": vid, "pid": pid, "product": product, "inUseBy": None}
-
-
-def scan_holders(paths):
-    """{device path: [pid, ...]} of the processes that have these devices open, from /proc/*/fd.
-    Other users' processes can't be read; those are caught when the open fails (EBUSY)."""
-    want = set(paths)
-    found = {}
-    for d in os.listdir("/proc"):
-        if not d.isdigit():
-            continue
-        try:
-            fds = os.listdir(f"/proc/{d}/fd")
-        except OSError:
-            continue
-        for fd in fds:
-            try:
-                target = os.readlink(f"/proc/{d}/fd/{fd}")
-            except OSError:
-                continue
-            if target in want and int(d) not in found.setdefault(target, []):
-                found[target].append(int(d))
-    return found
-
-
-def process_name(pid):
-    """'UGS (java, pid 4242)', 'python3 (pid 77)'..."""
-    comm = _read(f"/proc/{pid}/comm") or "?"
-    args = [a for a in _read(f"/proc/{pid}/cmdline").split("\0") if a]
-    if re.search(r"ugsplatform|universal-g-code-sender", " ".join(args), re.I):
-        return f"UGS ({comm}, pid {pid})"
-    if len(comm) == 15:        # the kernel cuts names to 15 characters: look for the whole one
-        comm = next((os.path.basename(a) for a in args[:2] if os.path.basename(a).startswith(comm)), comm)
-    return f"{comm} (pid {pid})"
-
+# ------------------------------------------------------------------ ports (the ports package: listing them, and who
+# has one open, reads only /dev, /sys and /proc on Linux, the registry on Windows)
 
 def holders_text(pids):
     names = [process_name(p) for p in pids[:3]]
@@ -841,46 +761,16 @@ def other_holders(real):
     return holders_text([p for p in scan_holders({real}).get(real, []) if p != os.getpid()])
 
 
-def open_port(path, speed):
-    """Opens a serial port exclusively, raw 8N1 at the given termios speed. Returns the fd (non-blocking)."""
+def open_port(path, baud):
+    """Opens a serial port (ports.open_serial: exclusively, raw 8N1 at baud). Returns its port object."""
     try:
-        fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
-    except OSError as e:
-        if e.errno == errno.EBUSY:
-            raise MachineError(f"Port {path} is busy: another program has it open exclusively. "
-                               "Disconnect it there first.", 409)
-        if e.errno == errno.EACCES:
-            raise MachineError(f"No permission to open {path}. Add yourself to the dialout group "
-                               "(sudo usermod -aG dialout $USER) and log in again.")
-        raise MachineError(f"Could not open {path}: {e.strerror}")
-    try:
-        fcntl.ioctl(fd, termios.TIOCEXCL)   # nobody else can open it now
-        a = termios.tcgetattr(fd)
-        a[0] = 0                                                   # iflag: no flow control or CR/LF changes
-        a[1] = 0                                                   # oflag: send bytes as they are
-        a[2] = (a[2] & ~(termios.CSIZE | termios.PARENB | termios.CSTOPB | termios.CRTSCTS)
-                | termios.CS8 | termios.CREAD | termios.CLOCAL)   # 8N1, ignore modem lines (HUPCL left as it was)
-        a[3] = 0                                                   # lflag: raw, no echo
-        a[4] = a[5] = speed
-        a[6][termios.VMIN] = 1
-        a[6][termios.VTIME] = 0
-        termios.tcsetattr(fd, termios.TCSANOW, a)
-        termios.tcflush(fd, termios.TCIFLUSH)                      # drop anything sent before we opened it
-    except (OSError, termios.error) as e:
-        close_port(fd)
-        raise MachineError(f"{path} is not a usable serial port ({e.args[-1] if e.args else e})")
-    return fd
+        return open_serial(path, baud)
+    except PortError as e:
+        raise MachineError(str(e), e.status) from None
 
 
-def close_port(fd):
-    try:
-        fcntl.ioctl(fd, termios.TIOCNXCL)
-    except OSError:
-        pass
-    try:
-        os.close(fd)
-    except OSError:
-        pass
+def close_port(port):
+    port.close()
 
 
 # ------------------------------------------------------------------ the connection
@@ -939,19 +829,17 @@ class HoldJog:
 
 
 class Link:
-    """One open serial port and its reader thread, which also polls, keeps the timers and sends
-    the queued lines one at a time. All its state is guarded by the Machine's lock."""
+    """One open serial port (or the Demo machine's socket: a port object of the ports package) and its reader
+    thread, which also polls, keeps the timers and sends the queued lines one at a time. All its state is guarded by
+    the Machine's lock."""
 
-    def __init__(self, machine, fd, path, baud):
+    def __init__(self, machine, port, path, baud):
         self.machine = machine
         self.lock = machine.lock
-        self.fd = fd
+        self.port = fd_port(port) if isinstance(port, int) else port   # (an fd: the tests' ptys)
         self.path = path
         self.baud = baud
-        self.wlock = threading.Lock()       # guards writes and closing the fds
-        self.wake_r, self.wake_w = os.pipe()
-        os.set_blocking(self.wake_r, False)
-        os.set_blocking(self.wake_w, False)
+        self.wlock = threading.Lock()       # guards writes and closing the port
         self.thread = threading.Thread(target=self.run, name=f"fluidnc {path}", daemon=True)
         self.first = threading.Event()      # set by the first status report (or by closing)
         self.connected = False              # True once FluidNC has answered '?'
@@ -1047,15 +935,9 @@ class Link:
                     self.write(data)
                 if stopping:                # (closing: what was decided before still went, e.g. the safe
                     break                   # stop's Soft Reset just before Disconnect closes the port)
-                ready = select.select([self.fd, self.wake_r], [], [], wait)[0]
-                if self.wake_r in ready:
+                if self.port.wait(wait):
                     try:
-                        os.read(self.wake_r, 512)
-                    except BlockingIOError:
-                        pass
-                if self.fd in ready:
-                    try:
-                        data = os.read(self.fd, 4096)
+                        data = self.port.read(4096)
                     except BlockingIOError:
                         continue
                     if not data:
@@ -1078,13 +960,9 @@ class Link:
 
     def close(self):
         with self.wlock:
-            fd, self.fd = self.fd, None
-            wake, self.wake_r, self.wake_w = (self.wake_r, self.wake_w), None, None
-        if fd is not None:
-            close_port(fd)
-        for w in wake:
-            if w is not None:
-                os.close(w)
+            port, self.port = self.port, None
+        if port is not None:
+            close_port(port)            # (the Demo machine's: its simulator stops too)
         self.closed = True
         self.first.set()
         self.machine.link_closed(self)
@@ -1100,11 +978,8 @@ class Link:
 
     def wake(self):
         with self.wlock:
-            if self.wake_w is not None:
-                try:
-                    os.write(self.wake_w, b"x")
-                except BlockingIOError:
-                    pass
+            if self.port is not None:
+                self.port.wake()
 
     def write_realtime(self, byte):
         """A realtime byte, at once (FluidNC acts on it wherever it is in the stream). Only for Disconnect,
@@ -1118,10 +993,10 @@ class Link:
         end = time.monotonic() + WRITE_TIMEOUT
         while data:
             with self.wlock:
-                if self.fd is None:
+                if self.port is None:
                     raise OSError(errno.EBADF, "not connected")
                 try:
-                    n = os.write(self.fd, data)
+                    n = self.port.write(data)
                 except BlockingIOError:
                     n = 0
             data = data[n:]
@@ -2978,19 +2853,23 @@ class Machine:
 
     # -------------------------------------------------- calls from the page
 
-    def ports(self):
-        paths = []
-        if not self.only_extra:
-            for pattern in ("ttyUSB", "ttyACM", "rfcomm"):
-                names = [n for n in os.listdir("/dev") if n.startswith(pattern) and n[len(pattern):].isdigit()]
-                paths += ["/dev/" + n for n in sorted(names, key=lambda n: int(n[len(pattern):]))]
+    def ports(self, demo=False):
+        """The serial ports to offer, and the one to choose first ("default": the first free USB serial port).
+        demo: the Demo machine last (the Connect dialog's list; never the default, and never the probe's or the
+        pendant's)."""
+        paths = [] if self.only_extra else list_ports()
         paths += [p for p in self.extra if p not in paths and os.path.exists(p)]
         ports = [describe_port(p) for p in paths]
-        holders = scan_holders({os.path.realpath(p) for p in paths})
+        if demo:
+            ports.append(describe_port(DEMO_PORT))
+            with self.lock:
+                if self.link and self.link.path == DEMO_PORT:
+                    ports[-1]["inUseBy"] = "FluidSender (connected)"
+        holders = scan_holders({real_port(p) for p in paths})
         with self.lock:
             mine = self.link.path if self.link else None
         for p in ports:
-            pids = holders.get(os.path.realpath(p["path"]), [])
+            pids = holders.get(real_port(p["path"]), [])
             others = [pid for pid in pids if pid != os.getpid()]
             if others:
                 p["inUseBy"] = holders_text(others)
@@ -3022,29 +2901,16 @@ class Machine:
                 self.connecting = False
 
     def _connect(self, path, baud, force):
-        real = os.path.realpath(path)
-        test_ports = {os.path.realpath(p) for p in self.extra}
-        if self.open_only_extra and real not in test_ports:
-            raise MachineError(f"{path} is not one of the test ports this server may open")
-        kind = port_kind(real)
-        if real not in test_ports and kind not in ("usb-serial", "usb-acm", "bluetooth"):
-            raise MachineError(f"{path} is not a USB or Bluetooth serial port")
-        if not os.path.exists(real):
-            raise MachineError(f"{path} is not there (unplugged?)")
-        if kind in RISKY and not force:
-            raise MachineError(f"{path} looks like {RISKY[kind]}, not FluidNC. Not connected.")
-
-        def in_use(others):
-            return MachineError(f"Port {path} is in use by {others}. Disconnect it there first.", 409)
-        others = other_holders(real)
-        if others:
-            raise in_use(others)
-        fd = open_port(real, BAUDS[baud])
-        others = other_holders(real)        # someone may have opened it just before we locked it
-        if others:
-            close_port(fd)
-            raise in_use(others)
-        link = Link(self, fd, path, baud)
+        if path == DEMO_PORT:               # (no real port: allowed in test mode too)
+            try:
+                port = start_demo()
+            except PortError as e:
+                raise MachineError(str(e)) from None
+            self.log("info", "Demo machine: a simulated FluidNC in FluidSender itself; nothing real moves. It starts "
+                     "in ALARM like a machine with homing: Home it (or Unlock)")
+        else:
+            port = self.open_serial(path, baud, force)
+        link = Link(self, port, path, baud)
         with self.lock:
             self.link = link
         link.start()
@@ -3060,6 +2926,33 @@ class Machine:
             raise MachineError(why or f"No answer from {path} within {FIRST_STATUS:g} s. Is it the FluidNC "
                                f"controller, switched on, at {baud} baud?")
         link.wake()
+
+    def open_serial(self, path, baud, force):
+        """Opens FluidNC's serial port, unless it isn't one (or is the probe's or the pendant's kind, without force),
+        or another program has it open."""
+        real = real_port(path)
+        test_ports = {real_port(p) for p in self.extra}
+        if self.open_only_extra and real not in test_ports:
+            raise MachineError(f"{path} is not one of the test ports this server may open")
+        kind = port_kind(real)
+        if real not in test_ports and kind not in ("usb-serial", "usb-acm", "bluetooth"):
+            raise MachineError(f"{path} is not a USB or Bluetooth serial port")
+        if not port_exists(real):
+            raise MachineError(f"{path} is not there (unplugged?)")
+        if kind in RISKY and not force:
+            raise MachineError(f"{path} looks like {RISKY[kind]}, not FluidNC. Not connected.")
+
+        def in_use(others):
+            return MachineError(f"Port {path} is in use by {others}. Disconnect it there first.", 409)
+        others = other_holders(real)
+        if others:
+            raise in_use(others)
+        port = open_port(real, baud)
+        others = other_holders(real)        # someone may have opened it just before we locked it
+        if others:
+            close_port(port)
+            raise in_use(others)
+        return port
 
     def disconnect(self):
         """Closes FluidNC's port (also when the server stops). A jog gets its jog cancel first. During a job, a
@@ -3871,7 +3764,7 @@ class Machine:
         path = path.strip() if isinstance(path, str) else ""
         if not path:
             raise MachineError("No port given")
-        if self.open_only_extra and os.path.realpath(path) not in {os.path.realpath(p) for p in self.extra}:
+        if self.open_only_extra and real_port(path) not in {real_port(p) for p in self.extra}:
             raise MachineError(f"{path} is not one of the test ports this server may open")
         return path
 

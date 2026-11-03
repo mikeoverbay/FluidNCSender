@@ -213,6 +213,9 @@ export class MachineClient {
   scanSave(path) { return apiJson('/api/scan/save', { path }); }
 }
 
+/** The Demo machine's "port" (machine.py DEMO_PORT): a simulated FluidNC in the server, no real machine. */
+export const DEMO_PORT = 'Demo machine';
+
 /** A job that is still going (running, paused or stopping), as the server's job event says. */
 export const jobActive = job => !!job && ['running', 'paused', 'stopping'].includes(job.state);
 

@@ -81,8 +81,7 @@ class Base(base.Stage2):
     def new_link(self, m=None):
         """A new connection to the same FluidNC (as after Disconnect and Connect), on m (FluidSender started
         again) or the same Machine."""
-        for fd in (self.link.wake_r, self.link.wake_w):
-            os.close(fd)
+        self.link.port.close()          # (its wake-up pipe; fd -1 is no port)
         if m is not None:
             m.emit = self.events.append
             m.clock = lambda: self.t

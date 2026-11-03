@@ -1,0 +1,2 @@
+# FluidSender.bat keeps its Windows line ends (CRLF) as committed, also in GitHub's ZIP download
+*.bat -text
