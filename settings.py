@@ -10,9 +10,12 @@ Python standard library only. Keys:
     "touchScan"    the touch probe scan's settings (inches; touchscan.py): minX, minY, maxX, maxY, xPoints, yPoints,
                    clearance (the work Z the bit travels at between points), depth (how far below work Z 0 a touch
                    searches) and feed (the touch's speed, in/min). Its own: the auto probe's "scan" is another
+    "touchOff"     Touch off Z's settings (inches; touchscan.py): plateThickness (the touch plate's; 0 until the user
+                   sets it, which Touch off Z refuses), searchDistance (how far down the bit looks for the plate),
+                   feed (in/min) and liftAfter (how far the bit goes up off the plate afterwards)
     "probePort"    the probe's port when it was last connected (or null)
     "pendantPort"  the pendant's port when it was last connected (or null)
-    "zeros"        Undo Zero's records, oldest first: the last 5 zeros (page or pendant), each with the work
+    "zeros"        Undo Zero's records, oldest first: the last 5 zeros (page, pendant or touch off), each with the work
                    offset from before it (see machine.py). Kept over resets, reconnects and restarts, as FluidNC
                    keeps its work offsets
     "level"        the last auto-level's settings (leveling.py): {"zSurface": 0, "arcSegmentMm": 0.1}, the Z
@@ -48,7 +51,7 @@ MAX_POINTS = 100                            # per axis
 MAX_TOTAL = 2000                            # points in a scan
 MAX_COORD = 100.0                           # in: a scan corner further out is a mistake
 ZERO_KEEP = 5                               # zeros Undo Zero can go back through
-ZERO_SOURCES = ("page", "pendant")          # where a zero came from
+ZERO_SOURCES = ("page", "pendant", "touch off")     # where a zero came from
 MAX_ZERO = 100.0                            # in: the largest work position a zero sets (as machine.py)
 MAX_WCO = 100000.0                          # mm: a work offset further out than this is damage
 TOUCH = {"minX": 0.0, "minY": 0.0, "maxX": 0.0, "maxY": 0.0, "xPoints": 5, "yPoints": 5, "clearance": 0.1,
@@ -56,6 +59,12 @@ TOUCH = {"minX": 0.0, "minY": 0.0, "maxX": 0.0, "maxY": 0.0, "xPoints": 5, "yPoi
 CLEARANCE = (0.02, 2.0)                     # in: the touch scan's travel height above work Z 0
 DEPTH = (0.01, 1.0)                         # in: how far below work Z 0 a touch searches
 TOUCH_FEED = (0.1, 50.0)                    # in/min: the touch's speed (G38.2's F)
+TOUCH_OFF = {"plateThickness": 0.0, "searchDistance": 1.0, "feed": 2.0, "liftAfter": 0.25}
+                                            # (a first run: no plate thickness, which Touch off Z refuses)
+PLATE = (0.0, 2.0)                          # in: the touch plate's thickness (0: not set yet)
+SEARCH = (0.05, 3.0)                        # in: how far down Touch off Z looks for the plate
+OFF_FEED = (0.5, 20.0)                      # in/min: its touch's speed
+LIFT = (0.0, 2.0)                           # in: how far it goes back up off the plate
 LEVEL = {"zSurface": 0.0, "arcSegmentMm": 0.1}  # auto-level: the user's UGS Z surface; 0.1 mm arc pieces (leveling.py)
 Z_SURFACE_MAX = 10.0                        # in
 ARC_MIN, ARC_MAX = 0.01, 2.0                # mm
@@ -67,7 +76,8 @@ MACRO_NAME = 40                             # characters in a macro's name at mo
 MACRO_CODE = 4000                           # characters in a macro's code at most
 MAX_MACROS = 50
 DEFAULTS = {"jog": JOG, "scan": SCAN, "touchScan": TOUCH, "probePort": None, "pendantPort": None,
-            "zeros": [], "macros": MACROS}                    # ("level": see above)
+            "zeros": [], "macros": MACROS,
+            "touchOff": TOUCH_OFF}                    # ("level": see above)
 _DEFAULT_FILE = object()
 
 
@@ -175,6 +185,23 @@ def check_touch(value):
     return out
 
 
+def check_touch_off(value):
+    """Touch off Z's settings, checked: plate thickness 0 to 2 in (0: not set yet), search distance 0.05 to 3 in,
+    feed 0.5 to 20 in/min, lift after 0 to 2 in."""
+    if not isinstance(value, dict):
+        raise SettingsError("Touch off settings: give plateThickness, searchDistance, feed and liftAfter")
+    out = {}
+    for key, (lo, hi), unit, name in (("plateThickness", PLATE, "in", "Plate thickness"),
+                                      ("searchDistance", SEARCH, "in", "Search distance"),
+                                      ("feed", OFF_FEED, "in/min", "Touch off feed"),
+                                      ("liftAfter", LIFT, "in", "Lift after")):
+        v = _number(value.get(key))
+        if v is None or not lo <= v <= hi:
+            raise SettingsError(f"{name}: a number from {lo:g} to {hi:g} {unit}")
+        out[key] = v + 0.0
+    return out
+
+
 def check_port(value):
     if value is None:
         return None
@@ -273,7 +300,8 @@ def check_macros(value):
 
 CHECKS = {"jog": check_jog, "scan": check_scan, "touchScan": check_touch, "probePort": check_port,
           "pendantPort": check_port,
-          "zeros": check_zeros, "level": check_level, "macros": check_macros}
+          "zeros": check_zeros, "level": check_level, "macros": check_macros,
+          "touchOff": check_touch_off}
 
 
 class Settings:

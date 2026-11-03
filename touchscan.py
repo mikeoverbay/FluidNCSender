@@ -39,7 +39,23 @@ the scan waits there ("Paused at point n of N") until Resume, which goes on with
 safe-stops the CNC (machine.stop: a hold, then a reset once it stands still), then raises Z all the way up
 (machine.scan_raise: G53 to the top of the Z travel, never in an alarm); the machine's own Stop (the page's or the
 pendant's) does the same. The points measured so far stay on screen.
-"""
+
+Touch off Z (touch_off: POST /api/touch/off) sets the work Z zero with a touch plate (a "hockey puck": a metal disc
+of known thickness with a lead, the other lead's clip on the bit). The plate lies on the stock under the bit; the
+bit comes down until it touches the plate, and the work Z there becomes the plate's thickness, so Z 0 is the stock's
+top. Its own settings (settings.json "touchOff": plateThickness, searchDistance, feed, liftAfter; settings.py
+check_touch_off), its own state ("off" in state()), and the machine's activity TOUCH_OFF ("A touch-off is running").
+With the bit at work Z z, in inches:
+    G20 G90 G38.2 Z<z - searchDistance> F<feed>     down until it touches the plate
+    G10 L20 P0 G20 Z<plateThickness>                the work Z there (machine.touch_zero: kept for Undo Zero)
+    G20 G90 G0 Z<plateThickness + liftAfter>        up off the plate (none with liftAfter 0)
+Every line says G90 (absolute: the targets are counted from the work Z it started at), so the distance mode is
+G90 afterwards whatever the outcome, and a G91 left from before is gone. The G10's value counts in the few
+ten-thousandths the bit coasts past the touch (it is set where the bit stands, from where FluidNC says it touched).
+The same refusals as the scan's Start (connected, Idle, nothing else going on, the spindle off, the probe input
+open, a verified probe check, which it uses up), and a plate thickness set (0 on a first run: NO_PLATE). No contact
+within the search distance (ALARM:5) ends it at once with nothing set; Stop (the tab's, the machine's or the
+pendant's) ends it as the scan's Stop does, Z raised all the way up. Once done, clipWarn as after a scan."""
 
 import math
 import os
@@ -48,10 +64,11 @@ import time
 import traceback
 
 from leveling import setup_line
-from machine import TOUCH, MachineError, ProbeFailed, SpindleOn, fixed
+from machine import TOUCH, TOUCH_OFF, MachineError, ProbeFailed, SpindleOn, fixed
 from scan import _real, _sentence, axis_values, probe_order, write_file, xyz_text
 from settings import TOUCH as DEFAULTS
-from settings import SettingsError, check_touch
+from settings import TOUCH_OFF as OFF_DEFAULTS
+from settings import SettingsError, check_touch, check_touch_off
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KEY = "touchScan"           # its settings.json key
@@ -60,6 +77,10 @@ STOPPED = "Touch scan stopped."
 RAPID = 50.0                # in/min: the slowest rapid to count with when FluidNC's max rates aren't known
 MOVE_MIN = 15.0             # s: a move may take this long at least, or 3x its time at the rapid + 2 s
 TOUCH_MORE = 15.0           # s: a touch may take its time at the feed (clearance to -depth) x 1.5, and this more
+OFF_KEY = "touchOff"        # Touch off Z's settings.json key
+NO_PLATE = ("Plate thickness not set: measure the touch plate (calipers) and type its thickness first. Z 0 becomes "
+            "the plate's bottom: the stock's top.")
+OFF_STOPPED = "Touch off Z stopped: Z not set."
 
 
 def check_settings(data=None, base=None):
@@ -90,6 +111,26 @@ def load_settings(raw):
         except MachineError:
             pass
     return dict(DEFAULTS)
+
+
+def check_off_settings(data=None, base=None):
+    """Touch off Z's settings: data (all or some of OFF_DEFAULTS' keys) over base (the saved ones) over the defaults,
+    checked (settings.check_touch_off). Returns all of them; raises MachineError (400) with what is wrong."""
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise MachineError("Touch off settings must be an object")
+    unknown = sorted(set(data) - set(OFF_DEFAULTS))
+    if unknown:
+        raise MachineError(f"Unknown touch off setting: {unknown[0]}")
+    out = dict(OFF_DEFAULTS)
+    if isinstance(base, dict):
+        out.update((k, base[k]) for k in OFF_DEFAULTS if k in base)
+    out.update(data)
+    try:
+        return check_touch_off(out)
+    except SettingsError as e:
+        raise MachineError(str(e)) from None
 
 
 def area_unset(s):
@@ -143,6 +184,11 @@ class TouchScanner:
                                             # clip off the bit first (until FluidNC is disconnected)
         self.pos = None                     # where the bit is (work X, Y, Z; for the next move's timeout)
         self.rate = RAPID
+        self.kind = None                    # what the thread runs (or ran last): "scan", or "off" (Touch off Z)
+        self.off = {"phase": None, "message": None, "error": None, "started": None, "finished": None, "z": None}
+                                            # Touch off Z's own state: phase probing, zeroing, lifting, stopping;
+                                            # then done, stopped or failed. z: the work Z it set
+        self.off_settings = None            # the running touch-off's settings
 
     # -------------------------------------------------- state and settings
 
@@ -161,14 +207,32 @@ class TouchScanner:
         self.changed()
         return {"settings": settings}
 
-    def remember(self, settings):
+    def remember(self, settings, key=KEY):
         if hasattr(self.store, "set"):
-            self.store.set(KEY, dict(settings))
+            self.store.set(key, dict(settings))
         elif isinstance(self.store, dict):
-            self.store[KEY] = dict(settings)
+            self.store[key] = dict(settings)
+
+    def saved_off_settings(self):
+        """Touch off Z's saved settings (the defaults if missing or bad)."""
+        try:
+            raw = self.store.get(OFF_KEY) if self.store is not None else None
+            return check_off_settings({k: raw[k] for k in OFF_DEFAULTS if k in raw} if isinstance(raw, dict) else {})
+        except MachineError:
+            return dict(OFF_DEFAULTS)
+        except Exception:                   # (a broken store must not break the snapshot)
+            traceback.print_exc()
+            return dict(OFF_DEFAULTS)
+
+    def save_off_settings(self, data):
+        """Checks and saves Touch off Z's settings (POST /api/touch/offsettings). Returns {"settings": all of them}."""
+        settings = check_off_settings(data, self.saved_off_settings())
+        self.remember(settings, OFF_KEY)
+        self.changed()
+        return {"settings": settings}
 
     def state(self):
-        saved = self.saved_settings()
+        saved, off_saved = self.saved_settings(), self.saved_off_settings()
         with self.lock:
             result = None
             if self.xs is not None:
@@ -176,13 +240,16 @@ class TouchScanner:
                           if (i, j) in self.z]
                 result = {"settings": dict(self.settings), "xs": list(self.xs), "ys": list(self.ys),
                           "points": points, "complete": self.text is not None, "text": self.text}
-            settings = self.settings if self.running and self.settings else saved
+            scanning = self.running and self.kind == "scan"
+            settings = self.settings if scanning and self.settings else saved
             total = len(self.order) if self.order else saved["xPoints"] * saved["yPoints"]
-            return {"running": self.running, "phase": self.phase, "point": len(self.z), "points": total,
+            off = dict(self.off, running=self.running and self.kind == "off",
+                       settings=dict(self.off_settings if self.running and self.kind == "off" else off_saved))
+            return {"running": scanning, "phase": self.phase, "point": len(self.z), "points": total,
                     "at": dict(self.at) if self.at else None, "lastZ": self.last_z, "settings": dict(settings),
                     "paused": self.paused, "pausing": self.pausing and not self.paused, "result": result,
                     "error": self.error, "message": self.message, "savedTo": self.saved_to, "started": self.started,
-                    "finished": self.finished, "clipWarn": self.clip}
+                    "finished": self.finished, "clipWarn": self.clip, "off": off}
 
     def last_scan(self):
         """This session's complete touch scan: {"text" (the .xyz), "savedTo", "finished"}, or None."""
@@ -215,7 +282,7 @@ class TouchScanner:
             raise MachineError(UNSET)
         with self.lock:
             if self.running or self.starting:
-                raise MachineError("A touch scan is already running", 409)
+                raise MachineError(self.busy(), 409)
             self.starting = True
             self.stopping = self.pausing = self.paused = False
         try:
@@ -229,6 +296,7 @@ class TouchScanner:
             ys = axis_values(settings["minY"], settings["maxY"], settings["yPoints"])
             with self.lock:
                 self.running = True
+                self.kind = "scan"
                 self.ending = False
                 self.phase = "stopping" if self.stopping else "starting"
                 self.settings, self.xs, self.ys = settings, xs, ys
@@ -277,7 +345,7 @@ class TouchScanner:
         """Pause (POST /api/touch/pause): the scan stops after the point it is at, with the bit back at the
         clearance, and waits there for Resume. Refused when no scan runs, or it is stopping or paused already."""
         with self.lock:
-            if not self.running or self.stopping or self.ending:
+            if not self.running or self.kind != "scan" or self.stopping or self.ending:
                 raise MachineError("No touch scan is running", 409)
             if self.paused or self.pausing:
                 raise MachineError("The touch scan is paused already" if self.paused
@@ -292,7 +360,7 @@ class TouchScanner:
         """Resume (POST /api/touch/resume): a paused scan goes on with the next point; one that was only going to
         pause doesn't. Refused when it is neither."""
         with self.lock:
-            if not self.running or self.stopping or not (self.paused or self.pausing):
+            if not self.running or self.kind != "scan" or self.stopping or not (self.paused or self.pausing):
                 raise MachineError("The touch scan is not paused", 409)
             was = self.paused
             self.pausing = self.paused = False
@@ -310,10 +378,13 @@ class TouchScanner:
             if not (self.running or self.starting) or self.stopping or self.ending:
                 return False
             self.stopping = True
-            if self.running:
+            off = self.kind == "off" and self.running
+            if off:
+                self.off["phase"] = "stopping"
+            elif self.running:
                 self.phase = "stopping"
             self.wake.notify_all()
-        self.log("info", "Stopping the touch scan")
+        self.log("info", "Stopping Touch off Z" if off else "Stopping the touch scan")
         self.changed()
         if stop_machine:
             try:
@@ -356,11 +427,15 @@ class TouchScanner:
         self.changed()
         return {"path": path, "size": len(text)}
 
-    def end_activity(self):
+    def end_activity(self, name=TOUCH):
         try:
-            self.machine.end_activity(TOUCH)
+            self.machine.end_activity(name)
         except Exception as e:
-            self.log("error", f"Touch scan: could not end the scan on the machine ({e})")
+            self.log("error", f"Touch scan: could not end the {name} on the machine ({e})")
+
+    def busy(self):
+        """What a second start is refused with (lock held)."""
+        return "Touch off Z is running" if self.running and self.kind == "off" else "A touch scan is already running"
 
     # -------------------------------------------------- the scan thread
 
@@ -591,3 +666,154 @@ class TouchScanner:
                 self.saved_to = path
         self.log("info", f"Touch scan saved to {path}")
         self.changed()
+
+    # -------------------------------------------------- Touch off Z (the touch plate)
+
+    def touch_off(self, settings=None):
+        """Touch off Z (POST /api/touch/off; see the top) with these settings (over the saved ones, which they
+        become). Refused (MachineError) if they are bad or set no plate thickness, a touch scan or touch-off runs, or
+        the machine refuses it (as start: not connected, not Idle, a job, the spindle on, the probe input closed, no
+        verified probe check...). Returns {"settings": the ones it runs with}."""
+        settings = check_off_settings(settings, self.saved_off_settings())
+        if settings["plateThickness"] <= 0:
+            raise MachineError(NO_PLATE)
+        with self.lock:
+            if self.running or self.starting:
+                raise MachineError(self.busy(), 409)
+            self.starting = True
+            self.stopping = self.pausing = self.paused = False
+        try:
+            self.machine.begin_activity(TOUCH_OFF)
+            try:                            # (the machine is the touch-off's now: nothing else can move it)
+                pos = self.ready()
+            except BaseException:
+                self.end_activity(TOUCH_OFF)
+                raise
+            with self.lock:
+                self.running = True
+                self.kind = "off"
+                self.ending = False
+                self.off_settings = settings
+                self.off = {"phase": "stopping" if self.stopping else "probing", "message": None, "error": None,
+                            "started": time.time(), "finished": None, "z": None}
+                self.pos = pos
+                self.thread = threading.Thread(target=self.run_off, name="touch off", daemon=True)
+            try:
+                self.thread.start()
+            except BaseException:
+                with self.lock:
+                    self.running = False
+                    self.off["phase"] = None
+                self.end_activity(TOUCH_OFF)
+                raise
+        finally:
+            with self.lock:
+                self.starting = False
+        try:
+            self.remember(settings, OFF_KEY)
+        except Exception as e:
+            self.log("error", f"Could not save the touch off settings ({e})")
+        self.changed()
+        return {"settings": dict(settings)}
+
+    def run_off(self):
+        """Touch off Z's thread: the touch-off, then its end (as run is the scan's)."""
+        outcome = None
+        try:
+            outcome = self.off_run()
+        except BaseException as e:          # a bug: say so, never leave the machine taken
+            traceback.print_exc()
+            outcome = ("failed", f"Touch off Z failed: internal error in FluidSender ({e!r}).")
+        finally:
+            with self.lock:
+                self.ending = True
+            phase, message = outcome or ("failed", "Touch off Z failed")
+            self.end_activity(TOUCH_OFF)
+            with self.lock:
+                self.running = self.stopping = self.ending = self.pausing = self.paused = False
+                self.off.update(phase=phase, finished=time.time(), message=message if phase == "done" else None,
+                                error=None if phase == "done" else message)
+            self.log("info" if phase in ("done", "stopped") else "error", message)
+            self.changed()
+
+    def off_phase(self, phase):
+        with self.lock:
+            if not self.stopping:
+                self.off["phase"] = phase
+        self.changed()
+
+    def off_run(self):
+        """The touch-off itself (see the top). Returns (phase, message) for the end."""
+        s = self.off_settings
+        plate, search, feed, lift = s["plateThickness"], s["searchDistance"], s["feed"], s["liftAfter"]
+        start = self.pos[2]
+        bottom = round(start - search, 4)
+        self.rate = self.where()
+        self.log("info", f"Touch off Z: the bit comes down from Z {start:.4f} at F{feed:g} in/min until it touches the "
+                         f"plate, {search:g} in at most (to Z {bottom:.4f}); then Z there = the plate's thickness, "
+                         f"{plate:.4f} in, so Z 0 is the stock's top")
+        touch = f"G20 G90 G38.2 Z{fixed(bottom)} F{fixed(feed, 3)}"
+        touch_time = search / feed * 60.0 * 1.5 + TOUCH_MORE
+        zeroed = None                       # the work Z set, once its G10 got its ok
+        sent = False                        # the G10 went to the machine (its ok may still come after a Stop)
+        try:
+            self.check()
+            got = self.machine.touch_line(touch, touch_time, probe=True)
+            # The bit coasts a hair past the touch before it stops: the work Z where it stands is the plate's
+            # thickness less that (FluidNC's report after the ok is where it stands)
+            here = got["z"]
+            try:
+                wpos = (self.machine.status_now() or {}).get("wpos")
+                if isinstance(wpos, list) and len(wpos) >= 3 and _real(wpos[2]) and abs(wpos[2] - got["z"]) < 0.01:
+                    here = wpos[2]
+            except Exception:
+                traceback.print_exc()
+            value = round(plate - (got["z"] - here), 4)
+            self.check()
+            self.off_phase("zeroing")
+            sent = True
+            self.machine.touch_zero(value)
+            zeroed = value
+            with self.lock:
+                self.off["z"] = value
+            self.pos = [self.pos[0], self.pos[1], value]
+            if lift > 0:
+                self.check()
+                self.off_phase("lifting")
+                self.move(z=round(plate + lift, 4))
+        except ProbeFailed as e:
+            if e.code == 4:
+                return "failed", ("Probe input closed before the touch: is the bit already on the plate, or the clip "
+                                  "touching the plate? Z not set. FluidNC is in ALARM:4 now: Unlock, then raise Z.")
+            return "failed", (f"No contact within {search:g} in: is the plate under the bit and the clip on? Z not "
+                              "set. FluidNC is in ALARM:5 now: Unlock, then raise Z (or bring the bit closer to the "
+                              "plate, or make the search distance longer).")
+        except SpindleOn:
+            with self.lock:
+                self.stopping = True        # (machine.stop calls stop() here: nothing more to do there)
+            try:
+                self.machine.stop()
+            except Exception as e:
+                self.log("error", f"Touch off Z: the machine could not be stopped ({e})")
+            return "failed", ("Touch off Z stopped: the spindle came on. FluidNC was stopped (Hold, then Soft Reset, "
+                              f"which turns it off). {self.set_note(zeroed, sent)}")
+        except Exception as e:
+            if self.stopped(e):
+                head = OFF_STOPPED if not sent else f"Touch off Z stopped. {self.set_note(zeroed, sent)}"
+                return "stopped", f"{head}{self.raise_head()}"
+            return "failed", f"Touch off Z failed: {_sentence(e)} {self.set_note(zeroed, sent)}"
+        with self.lock:
+            self.clip = True
+        up = f"; the bit is up at Z {plate + lift:.4f}" if lift > 0 else f"; the bit is on the plate at Z {plate:.4f}"
+        return "done", (f"Touch off Z done: Z 0 is the stock's top{up}. Take the plate away and the clip off the bit. "
+                        "Undo Zero puts the old Z zero back.")
+
+    @staticmethod
+    def set_note(z, sent):
+        """Whether the Z zero was set, for a touch-off that did not get to its end."""
+        if z is not None:
+            return f"Z was set (the bit at Z {z:.4f} on the plate): Undo Zero puts the old Z zero back."
+        if sent:
+            return ("Z may have been set (its G10 had gone to FluidNC): see the Console; if it was, Undo Zero puts the "
+                    "old Z zero back.")
+        return "Z not set."

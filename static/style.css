@@ -566,6 +566,8 @@ button.go:hover { background: var(--go-hover); }
 .sc-tgrid { flex: 1 1 146px; max-width: 230px; }
 .sc-tset { flex: 1 1 160px; max-width: 240px; }
 .sc-trun { flex: 1 1 90px; max-width: 150px; }
+.sc-toff { flex: 1 1 150px; max-width: 210px; }     /* Touch off Z (a touch plate): its settings, the button, Stop */
+.sc-toff .lbtns button[data-act=toff] { flex: 3 1 auto; }
 /* The two kinds of probing, one tab each (the Apply column is shared, outside them); a tab whose scan runs shows a dot */
 .stabs { display: flex; gap: 2px; margin: 0 0 4px; border-bottom: 1px solid var(--line, #555); }
 .stabs button { padding: 1px 10px; border-radius: 4px 4px 0 0; border-bottom: none; background: transparent; color: var(--dim);

@@ -55,7 +55,9 @@ out; a refused one answers 409 (400 for a bad call) with {"error": reason}:
   /api/pendant/...   GET ports; connect {"port", "force"}; disconnect {}
   /api/probe/...     GET ports; connect {"port", "force"}; disconnect {}; home {}
   /api/scan/...      start {"settings": {...}}; stop {}; settings {...} (saves them); save {"path": "a.xyz"}
-  /api/touch/...     the touch probe scan (touchscan.py): the same, and pause {} / resume {} (between points)
+  /api/touch/...     the touch probe scan (touchscan.py): the same, and pause {} / resume {} (between points);
+                     off {"settings": {...}} (Touch off Z with a touch plate; stop {} stops it too) and
+                     offsettings {...} (saves its settings)
 
 Distances are in inches, speeds in inches per minute. The probe, scan and pendant calls answer
 503 if their module could not be loaded (the rest of FluidSender works without them).
@@ -102,7 +104,7 @@ MACHINE_CALLS = ("connect", "disconnect", "send", "realtime", "jog", "zero", "ho
                  "coolant", "override", "goto", "program", "level", "run", "stop", "jogsettings", "macros", "macro")
 EXTRA_CALLS = {"pendant": ("connect", "disconnect"), "probe": ("connect", "disconnect", "home"),
                "scan": ("start", "stop", "settings", "save"),
-               "touch": ("start", "stop", "pause", "resume", "settings", "save")}
+               "touch": ("start", "stop", "pause", "resume", "settings", "save", "off", "offsettings")}
 PING_EVERY = 10.0
 PING = b'{"type":"ping"}\n'
 
@@ -381,6 +383,10 @@ class Handler(SimpleHTTPRequestHandler):
                 out = obj.resume()
             elif call == "settings":
                 out = obj.save_settings(data)
+            elif call == "off":             # (Touch off Z: the touch scan's machinery, a touch plate)
+                out = obj.touch_off(data.get("settings"))
+            elif call == "offsettings":
+                out = obj.save_off_settings(data)
             else:
                 out = obj.save(data.get("path"))
         except (MachineError, SettingsError) as e:
