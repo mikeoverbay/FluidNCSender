@@ -1,7 +1,11 @@
 # FluidNCSender (FluidSender)
 
-A lean, fast G-code sender made **only for FluidNC** CNC controllers. It was written to replace
-Universal G-code Sender (UGS), which is slow to start and slow to draw on small PCs.
+A lean, fast G-code sender made **only for FluidNC** CNC controllers, written to run well on small, slow PCs.
+
+> **Credit:** FluidSender's **auto-leveler** and **surface scan** are based on
+> **[Universal G-code Sender (UGS)](https://github.com/winder/Universal-G-Code-Sender)** by **Will Winder and the
+> UGS contributors**, re-implemented in Python from UGS's source (GPL-3.0). FluidSender is GPL-3.0 too. All credit
+> for that work goes to them; see [Credits](#credits) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 It runs as a small Python server (standard library only, no `pip install`) with a browser UI in its own
 Chrome app window. It is **inch-first** everywhere.
