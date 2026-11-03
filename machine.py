@@ -2845,6 +2845,15 @@ class Machine:
         get = getattr(newest, "last_scan", None)
         return get() if get else None
 
+    def at_rest(self, now, alone_for=None):
+        """True when FluidSender holds no FluidNC port and no scan or other activity runs, and (alone_for, in s)
+        no FluidSender window has been open for that long: server.py may then restart itself on new code or
+        quit (--quit-when-closed)."""
+        with self.lock:
+            if self.link is not None or self.activity:
+                return False
+            return alone_for is None or (not self.subs and now - self.alone_since >= alone_for)
+
     def release_extras(self, now):
         """Lets go of the pendant's and the probe's ports once no FluidSender window has been open for
         release_after, FluidSender holds no FluidNC port (Link.check_release lets go of that one first, and never

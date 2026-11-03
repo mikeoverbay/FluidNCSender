@@ -90,6 +90,8 @@ GCODE_EXT = (".nc", ".gcode", ".ngc", ".tap")
 EXTENSIONS = GCODE_EXT + (".xyz",)
 DEFAULT_DIR = hostos.DEFAULT_DIR    # Linux: the CarveMaker share; Windows: Documents (hostos.py)
 MAX_FILE = 64 * 1024 * 1024
+CODE_CHECK = 5.0        # s between looks at FluidSender's own code (new code: restart once at rest)
+QUIT_AFTER = 60.0       # s with no window open before --quit-when-closed quits (at rest only)
 MAX_BIG_CALL = 2 * MAX_FILE + 64 * 1024     # a 64 MB file as JSON text (its escapes make it longer)
 MAX_CALL = 64 * 1024
 BIG_CALLS = ("/api/save", "/api/machine/program")
@@ -485,7 +487,17 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--dir", default=DEFAULT_DIR, help="folder the file list starts in")
     ap.add_argument("--no-browser", action="store_true", help="don't open the browser")
+    ap.add_argument("--quit-when-closed", action="store_true",
+                    help=f"quit {QUIT_AFTER:g} s after the last FluidSender window closed, if no machine is connected "
+                         "and nothing runs (FluidSender.bat uses it: the server has no window of its own on Windows)")
     args = ap.parse_args()
+    if sys.stdout is None or sys.stderr is None:    # (no console: pythonw on Windows) its messages go to a log file
+        try:
+            log = open(os.path.join(HERE, "fluidsender-server.log"), "a", encoding="utf-8", buffering=1)
+            sys.stdout = sys.stdout or log
+            sys.stderr = sys.stderr or log
+        except OSError:
+            pass
 
     Handler.start_dir = args.dir        # (checked on each list: the share may be mounted later)
     Handler.allowed_hosts = (f"localhost:{args.port}", f"127.0.0.1:{args.port}")
@@ -514,6 +526,27 @@ def main():
                 traceback.print_exc()
     threading.Thread(target=release_watch, name="release-watch", daemon=True).start()
 
+    # Never stale, never left behind: new code (an update) restarts the server once it is at rest, and with
+    # --quit-when-closed it quits once no window has been open for QUIT_AFTER s
+    started = code_time()
+    then = {"restart": False}
+
+    def life_watch():
+        while True:
+            time.sleep(CODE_CHECK)
+            now = time.monotonic()
+            try:
+                if code_time() > started and Handler.machine.at_rest(now):
+                    print("FluidSender's code changed: restarting on it", flush=True)
+                    then["restart"] = True
+                elif not (args.quit_when_closed and Handler.machine.at_rest(now, QUIT_AFTER)):
+                    continue
+                server.shutdown()       # (serve_forever returns; main() cleans up, then restarts or ends)
+                return
+            except Exception:
+                traceback.print_exc()
+    threading.Thread(target=life_watch, name="life-watch", daemon=True).start()
+
     def stop(*_):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)     # kill: release the serial ports properly too
@@ -524,6 +557,25 @@ def main():
     finally:
         Handler.machine.shutdown()
         server.server_close()
+    if then["restart"]:
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
+def code_time():
+    """The newest change time of FluidSender's Python files (this folder's and ports/'s): 0 if none can be read."""
+    times = []
+    for folder in (HERE, os.path.join(HERE, "ports")):
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for n in names:
+            if n.endswith(".py"):
+                try:
+                    times.append(os.stat(os.path.join(folder, n)).st_mtime)
+                except OSError:
+                    pass
+    return max(times, default=0.0)
 
 
 if __name__ == "__main__":

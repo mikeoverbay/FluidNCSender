@@ -2,7 +2,8 @@
 rem FluidSender on Windows: starts the server (if it isn't running) and opens the page in its own
 rem Chrome or Edge window, as fluidsender.sh does on Linux. Double-click it.
 rem Needs Python 3.12 or newer from python.org ("Add python.exe to PATH" ticked when installing).
-rem The server runs in a minimized window called "FluidSender server": close that window to stop it.
+rem The server runs with no window of its own (pythonw) and quits by itself a minute after the last FluidSender
+rem window closes, when no machine is connected and nothing runs. Its messages go to fluidsender-server.log here.
 setlocal
 rem (pushd, not cd: it also works when this folder is on a network share, by mapping it to a drive letter)
 pushd "%~dp0"
@@ -16,14 +17,17 @@ rem Python: the py launcher first, else python on the PATH (not the Microsoft St
 set "PY="
 py -3 --version >NUL 2>&1 && set "PY=py -3"
 if not defined PY python --version >NUL 2>&1 && set "PY=python"
+rem (the same Python without a console window: pyw for py, pythonw for python)
+if "%PY%"=="py -3" (set "PYW=pyw -3") else (set "PYW=pythonw")
 if not defined PY goto nopython
 
-start "FluidSender server" /min %PY% server.py --no-browser --port %PORT%
+start "" %PYW% server.py --no-browser --port %PORT% --quit-when-closed
 for /l %%i in (1,1,20) do (
     timeout /t 1 /nobreak >NUL
     curl.exe -s -o NUL "%URL%" && goto browser
 )
-echo FluidSender's server did not start. Look in the "FluidSender server" window for the reason.
+echo FluidSender's server did not start. The reason is in fluidsender-server.log in this folder,
+echo or run this in this folder to see it:   %PY% server.py
 pause
 exit /b 1
 
