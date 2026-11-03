@@ -26,6 +26,12 @@ export async function listDir(dir) {
   return res.json();
 }
 
+/** The places to pick a working folder from (drives on Windows): [{ name, path }]. */
+export async function listPlaces() {
+  const res = await check(await fetch('/api/places', { headers: HEADERS }));
+  return (await res.json()).places;
+}
+
 export async function readFile(path) {
   const res = await check(await fetch('/api/file?path=' + encodeURIComponent(path), { headers: HEADERS }));
   return res.text();

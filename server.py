@@ -203,6 +203,8 @@ class Handler(SimpleHTTPRequestHandler):
             q = parse_qs(url.query)
             if url.path == "/api/list":
                 return self.list_dir(q.get("dir", [""])[0])
+            if url.path == "/api/places":      # (the Files panel's folder button: drives and other places)
+                return self.send_json({"places": hostos.places()})
             if url.path == "/api/file":
                 return self.read_file(q.get("path", [""])[0])
             if url.path == "/api/machine/ports":
