@@ -106,7 +106,7 @@ export class Viewer {
       <label title="Show the machine's travel (the box, the floor and the walls on its 0 sides) and its home corner (the dot)"><input type="checkbox" data-opt="machine"> Machine</label>
       <button class="vgear" data-act="machine" title="Machine box settings: travel, home corner (FluidNC's own are used while connected)">⚙</button>
       <span class="sep"></span>
-      <label title="Stretch heights to make small differences visible">Z <input type="range" data-opt="zscale" min="1" max="40" value="1"> <b class="zs">1×</b></label>
+      <label title="Stretch heights to make small differences visible. With a scan shown: its surface's bumps are stretched and a leveled toolpath rides on them (cut depths stay true); without one: all heights. The machine box keeps its true size">Z<input type="range" data-opt="zscale" min="1" max="40" value="1"> <b class="zs">1×</b></label>
       <button class="vshot" data-act="shot" title="Save a picture of this view (PNG, in Downloads)"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M9 4 7.2 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.2L15 4H9Zm3 4.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/></svg></button>`);
     this.stage = el('div', 'stage');
     this.canvas = el('canvas');
@@ -286,8 +286,15 @@ export class Viewer {
     if (!job) return;
 
     const leveled = this.options.leveled && this.scanUsable() && !this.levRect;
-    this.shown.cut = leveled ? levelSegments(job.cut, job.cutLine, this.scan.height) : { pos: job.cut, line: job.cutLine };
-    this.shown.rapid = leveled ? levelSegments(job.rapid, job.rapidLine, this.scan.height) : { pos: job.rapid, line: job.rapidLine };
+    // The Z stretch with a scan: the surface's heights are stretched, and a leveled program (its Z already has the
+    // scan's height in it) gets the stretch's extra height too, so it rides on the stretched surface while its cut
+    // depths stay true
+    const s = this.options.zscale, follow = this.surfaceStretch() && this.levRect && s !== 1;
+    const extra = follow ? (x, y) => (s - 1) * this.scan.height(x, y) : null;
+    const shown = (src, line) => (leveled ? levelSegments(src, line, this.scan.height)
+      : extra ? levelSegments(src, line, extra) : { pos: src, line });
+    this.shown.cut = shown(job.cut, job.cutLine);
+    this.shown.rapid = shown(job.rapid, job.rapidLine);
 
     this.layers.cut = this.lines(this.shown.cut.pos, this.cutColor(), new THREE.LineBasicMaterial({ vertexColors: true }));
     this.layers.rapid = this.lines(this.shown.rapid.pos, null, new THREE.LineBasicMaterial({ color: this.col.rapid }));
@@ -310,9 +317,10 @@ export class Viewer {
     const pos = new Float32Array(nx * ny * 3);
     const { all: col, done: doneCol } = this.scanColors();
     const done = [], todo = [];
+    const zs = this.surfaceStretch() ? this.options.zscale : 1;    // (the Z stretch of a complete scan: its heights)
     for (let i = 0; i < nx; i++) {
       for (let j = 0; j < ny; j++) {
-        const k = (i * ny + j) * 3, z = has(i, j) ? at(i, j) : zmin;
+        const k = (i * ny + j) * 3, z = (has(i, j) ? at(i, j) : zmin) * zs;
         pos[k] = xs[i]; pos[k + 1] = ys[j]; pos[k + 2] = z;
         if (has(i, j)) done.push(xs[i], ys[j], z); else todo.push(xs[i], ys[j], z);
       }
@@ -350,6 +358,25 @@ export class Viewer {
 
   /** A scan the leveled toolpath can use: complete, at least 2 x 2 points. */
   scanUsable() { return !!this.scan && !this.scan.partial && this.scan.xs.length > 1 && this.scan.ys.length > 1; }
+
+  /** Whether the Z stretch stretches the scan's surface (a complete scan is shown): then the scene keeps its true
+   *  scale, the surface's heights are stretched and a leveled program follows them (its cut depths stay true).
+   *  Otherwise (no scan) it stretches the whole scene's heights, as it always did; the machine box stays true. */
+  surfaceStretch() { return this.scanUsable() && this.options.scan; }
+
+  /** Applies the Z stretch (see surfaceStretch): rebuilds the surface and the toolpath, or scales the scene. */
+  applyZ() {
+    const s = this.options.zscale, surface = this.surfaceStretch();
+    this.world.scale.z = surface ? 1 : s;
+    if (this.layers.machine) this.layers.machine.scale.z = surface ? 1 : 1 / s;    // (true size either way)
+    if (surface || this.zWasSurface) {
+      this.buildScan();
+      this.buildJob();
+      this.highlight(this.line, this.lastLine);
+    }
+    this.zWasSurface = surface;
+    if (this.tool?.visible) this.placeTool();
+  }
 
   /** Highlights the moves of one file line (1-based), or of the lines line to last; 0 clears it. */
   highlight(line, last = line) {
@@ -430,6 +457,7 @@ export class Viewer {
       group.add(face, new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), edge));
     }
     group.position.set(-this.wco[0], -this.wco[1], -this.wco[2]);
+    group.scale.z = this.world.scale.z ? 1 / this.world.scale.z : 1;   // (true size whatever the Z stretch)
     group.visible = this.options.machine;
     this.layers.machine = group;
     this.world.add(group);
@@ -543,7 +571,8 @@ export class Viewer {
       this.buildJob();
       this.highlight(this.line, this.lastLine);
     }
-    this.syncBar();
+    if (this.options.zscale !== 1 && (this.surfaceStretch() || this.zWasSurface)) this.applyZ();   // (a scan came
+    this.syncBar();                                                                              // or went: see applyZ)
     if (fit) this.view('iso'); else this.render();
   }
 
@@ -575,7 +604,10 @@ export class Viewer {
     if (key === 'scan' && this.layers.surface) this.layers.surface.visible = value;
     if (key === 'machine' && this.layers.machine) { this.layers.machine.visible = value; this.onMachineShown?.(value); }
     if (key === 'leveled') { this.buildJob(); this.highlight(this.line, this.lastLine); }
-    if (key === 'zscale') this.world.scale.z = value;
+    if (key === 'zscale' || key === 'scan') {     // (rebuilt at most every 60 ms while the slider is dragged)
+      clearTimeout(this.zTimer);
+      this.zTimer = setTimeout(() => { this.applyZ(); this.render(); }, key === 'zscale' ? 60 : 0);
+    }
     this.syncBar();
     this.render();
   }
